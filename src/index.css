@@ -1,0 +1,655 @@
+@import "tailwindcss";
+
+:root {
+  --bg-main: #020617;
+  --card-bg: #0f172a;
+  --border-main: #334155;
+  --text-main: #ffffff;
+  --font-scale: 1;
+}
+
+/* =========================================================
+   Responsive Fluid Typography:
+   Dynamically scales all rem-based typography with viewport
+   width and window resize (clamp + calc + vw scaling)
+========================================================= */
+html {
+  /* Dynamic fluid base font-size calculated by viewport width */
+  font-size: clamp(13.5px, calc((0.82rem + 0.35vw) * var(--font-scale, 1)), 18.5px);
+  scroll-behavior: smooth;
+  text-size-adjust: 100%;
+  -webkit-text-size-adjust: 100%;
+}
+
+@media (min-width: 480px) {
+  html {
+    font-size: clamp(14px, calc((0.85rem + 0.35vw) * var(--font-scale, 1)), 19px);
+  }
+}
+
+@media (min-width: 768px) {
+  html {
+    font-size: clamp(14.5px, calc((0.88rem + 0.34vw) * var(--font-scale, 1)), 20px);
+  }
+}
+
+@media (min-width: 1024px) {
+  html {
+    font-size: clamp(15px, calc((0.9rem + 0.32vw) * var(--font-scale, 1)), 20.5px);
+  }
+}
+
+@media (min-width: 1440px) {
+  html {
+    font-size: clamp(15.5px, calc((0.94rem + 0.3vw) * var(--font-scale, 1)), 21.5px);
+  }
+}
+
+@media (min-width: 1920px) {
+  html {
+    font-size: clamp(16.5px, calc((1rem + 0.28vw) * var(--font-scale, 1)), 23px);
+  }
+}
+
+/* User Font Scaling Multipliers */
+html[data-font-size="sm"] {
+  --font-scale: 0.88;
+}
+html[data-font-size="md"] {
+  --font-scale: 1;
+}
+html[data-font-size="lg"] {
+  --font-scale: 1.12;
+}
+html[data-font-size="xl"] {
+  --font-scale: 1.25;
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  color: #f8fafc;
+  background-color: var(--bg-main);
+  min-height: 100vh;
+  overflow-x: hidden;
+  max-width: 100vw;
+  scroll-padding-top: 5rem;
+  line-height: 1.6;
+}
+
+/* Global Typography & Anti-Overflow Rules Across All Views */
+* {
+  min-width: 0;
+}
+
+p, span, div, h1, h2, h3, h4, h5, h6, button, a, label {
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+img, svg, video, canvas, audio, iframe, embed, object {
+  max-width: 100%;
+  height: auto;
+}
+
+p {
+  line-height: 1.65;
+}
+
+/* Typography Optimizer Dynamic Paragraph & Container Styles */
+.reader-optimized-paragraph {
+  transition: line-height 0.2s ease, max-width 0.2s ease, margin 0.2s ease;
+  margin-bottom: 0.65rem;
+  letter-spacing: 0.01em;
+  max-width: 100%;
+}
+
+.reader-optimized-paragraph.lh-compact {
+  line-height: 1.45 !important;
+}
+
+.reader-optimized-paragraph.lh-comfortable {
+  line-height: 1.75 !important;
+}
+
+.reader-optimized-paragraph.lh-spacious {
+  line-height: 2.0 !important;
+}
+
+.reader-optimized-paragraph.rw-optimal {
+  max-width: min(68ch, 100%);
+}
+
+.reader-optimized-paragraph.rw-focus {
+  max-width: min(55ch, 100%);
+}
+
+.reader-optimized-paragraph.para-indent {
+  text-indent: 2em;
+}
+
+/* Fluid Typography Utility Classes for Headings & Sentences with Compact Tracking & Spacing */
+.fluid-hero-title {
+  font-size: clamp(1.25rem, calc(1.05rem + 1vw), 2.25rem) !important;
+  line-height: 1.3 !important;
+  letter-spacing: -0.025em !important;
+  text-wrap: balance;
+}
+
+.fluid-card-sentence {
+  font-size: clamp(1.35rem, calc(1.15rem + 1.15vw), 2.35rem) !important;
+  line-height: 1.35 !important;
+  letter-spacing: -0.015em !important;
+  text-wrap: pretty;
+}
+
+.fluid-chinese-translation {
+  font-size: clamp(1.05rem, calc(0.95rem + 0.4vw), 1.45rem) !important;
+  line-height: 1.5 !important;
+  letter-spacing: 0.01em !important;
+}
+
+.fluid-phonetic-text {
+  font-size: clamp(0.92rem, calc(0.84rem + 0.3vw), 1.25rem) !important;
+  line-height: 1.4 !important;
+  letter-spacing: 0.02em !important;
+}
+
+.fluid-svo-word {
+  font-size: clamp(1.3rem, calc(1.1rem + 1.1vw), 2.2rem) !important;
+  line-height: 1.15 !important;
+  letter-spacing: -0.02em !important;
+}
+
+.fluid-svo-label {
+  font-size: clamp(0.8rem, calc(0.74rem + 0.2vw), 1.02rem) !important;
+  letter-spacing: 0.02em !important;
+}
+
+.fluid-svo-sub {
+  font-size: clamp(0.78rem, calc(0.72rem + 0.18vw), 0.98rem) !important;
+  letter-spacing: -0.01em !important;
+}
+
+.fluid-card-title {
+  font-size: clamp(1rem, calc(0.92rem + 0.35vw), 1.4rem) !important;
+  line-height: 1.2 !important;
+  letter-spacing: -0.015em !important;
+}
+
+.fluid-sub-text {
+  font-size: clamp(0.78rem, calc(0.72rem + 0.18vw), 0.96rem) !important;
+}
+
+/* Eye-comfort High Definition Text & Contrast Optimizations */
+.text-slate-400 {
+  color: #cbd5e1 !important; /* Boost faint dark grays to high-contrast crisp slate */
+}
+
+.text-slate-500 {
+  color: #94a3b8 !important; /* Ensure secondary labels are easily readable */
+}
+
+.border-slate-800 {
+  border-color: #334155 !important; /* Sharp crisp card borders */
+}
+
+/* =========================================================
+   Authentic Semiconductor Cleanroom Atmospheric Scenarios
+   - Litho (500nm Yellow Light Cleanroom)
+   - Plasma (Vacuum CVD/Etch Plasma Cyan)
+   - Alert (Interlock / Alarm SOS Crimson)
+   - Aurora (Balanced Full Spectrum)
+   - Contrast (Obsidian & 24K Gold Ultra Focus)
+========================================================= */
+
+/* Scenario 1: 500nm Litho Yellow Light Cleanroom */
+html[data-cleanroom-scenario="litho"] {
+  --scenario-accent: #fbbf24;
+  --scenario-glow: rgba(251, 191, 36, 0.35);
+  --scenario-border: #f59e0b;
+}
+html[data-cleanroom-scenario="litho"] .bg-cleanroom-grid {
+  background-image: 
+    radial-gradient(rgba(245, 158, 11, 0.14) 1.2px, transparent 1.2px),
+    radial-gradient(rgba(217, 119, 6, 0.08) 1.2px, transparent 1.2px) !important;
+  background-size: 26px 26px;
+}
+html[data-cleanroom-scenario="litho"] .litho-laser-line::before {
+  background: linear-gradient(90deg, #f59e0b, #fde047, #f59e0b) !important;
+}
+
+/* Scenario 2: Plasma CVD / Etch Chamber Cyan */
+html[data-cleanroom-scenario="plasma"] {
+  --scenario-accent: #38bdf8;
+  --scenario-glow: rgba(56, 189, 248, 0.35);
+  --scenario-border: #0284c7;
+}
+html[data-cleanroom-scenario="plasma"] .bg-cleanroom-grid {
+  background-image: 
+    radial-gradient(rgba(56, 189, 248, 0.14) 1.2px, transparent 1.2px),
+    radial-gradient(rgba(14, 165, 233, 0.08) 1.2px, transparent 1.2px) !important;
+  background-size: 26px 26px;
+}
+html[data-cleanroom-scenario="plasma"] .litho-laser-line::before {
+  background: linear-gradient(90deg, #06b6d4, #38bdf8, #60a5fa) !important;
+}
+
+/* Scenario 3: Interlock / Alarm SOS Crimson Alert */
+html[data-cleanroom-scenario="alert"] {
+  --scenario-accent: #f43f5e;
+  --scenario-glow: rgba(244, 63, 94, 0.38);
+  --scenario-border: #e11d48;
+}
+html[data-cleanroom-scenario="alert"] .bg-cleanroom-grid {
+  background-image: 
+    radial-gradient(rgba(244, 63, 94, 0.16) 1.2px, transparent 1.2px),
+    radial-gradient(rgba(225, 29, 72, 0.09) 1.2px, transparent 1.2px) !important;
+  background-size: 26px 26px;
+}
+html[data-cleanroom-scenario="alert"] .litho-laser-line::before {
+  background: linear-gradient(90deg, #f43f5e, #fbbf24, #f43f5e) !important;
+}
+
+/* Scenario 4: Cleanroom Aurora Full Spectrum */
+html[data-cleanroom-scenario="aurora"] {
+  --scenario-accent: #38bdf8;
+  --scenario-glow: rgba(56, 189, 248, 0.3);
+  --scenario-border: #818cf8;
+}
+
+/* Scenario 5: Ultra High Contrast Obsidian & Gold */
+html[data-cleanroom-scenario="contrast"] {
+  --scenario-accent: #facc15;
+  --scenario-glow: rgba(250, 204, 21, 0.35);
+  --scenario-border: #eab308;
+}
+html[data-cleanroom-scenario="contrast"] .bg-cleanroom-grid {
+  background-image: 
+    radial-gradient(rgba(250, 204, 21, 0.12) 1px, transparent 1px) !important;
+  background-size: 28px 28px;
+}
+
+.theme-light {
+  --bg-main: #f0f4f8;
+  --card-bg: #ffffff;
+  --border-main: #cbd5e1;
+  --text-main: #0f172a;
+}
+
+/* Theme light component overrides for eye-care lab mode */
+.theme-light .bg-slate-950 {
+  background-color: #f1f5f9 !important;
+  color: #0f172a !important;
+}
+
+.theme-light .bg-slate-900,
+.theme-light .bg-slate-900\/90 {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+}
+
+.theme-light .border-slate-800,
+.theme-light .border-slate-800\/90,
+.theme-light .border-slate-800\/80 {
+  border-color: #cbd5e1 !important;
+}
+
+.theme-light .text-slate-100,
+.theme-light .text-slate-200 {
+  color: #0f172a !important;
+}
+
+.theme-light .text-slate-400 {
+  color: #475569 !important;
+}
+
+@layer utilities {
+  /* Hide scrollbar for Chrome, Safari and Opera */
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  /* Hide scrollbar for IE, Edge and Firefox */
+  .no-scrollbar {
+    -ms-overflow-style: none;  /* IE and Edge */
+    scrollbar-width: none;  /* Firefox */
+  }
+
+  /* Custom subtle grid background for wafer/cleanroom feel */
+  .bg-cleanroom-grid {
+    background-image: 
+      radial-gradient(rgba(56, 189, 248, 0.07) 1px, transparent 1px),
+      radial-gradient(rgba(99, 102, 241, 0.05) 1px, transparent 1px);
+    background-size: 24px 24px;
+    background-position: 0 0, 12px 12px;
+  }
+
+  /* Custom Glow Accents */
+  .glow-cyan {
+    box-shadow: 0 0 25px -5px rgba(34, 211, 238, 0.25);
+  }
+
+  .glow-yellow {
+    box-shadow: 0 0 25px -5px rgba(250, 204, 21, 0.3);
+  }
+
+  .glow-indigo {
+    box-shadow: 0 0 30px -5px rgba(99, 102, 241, 0.25);
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translate3d(0, 6px, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+
+@keyframes pulseGlow {
+  0%, 100% { opacity: 0.85; transform: scale3d(1, 1, 1); }
+  50% { opacity: 1; transform: scale3d(1.025, 1.025, 1); }
+}
+
+/* Wafer Lithography Scanner Laser Scan Border Effect */
+@keyframes lithoScan {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+@keyframes lithoLaserFlow {
+  0% {
+    background-position: 0% 50%;
+  }
+  100% {
+    background-position: 200% 50%;
+  }
+}
+
+@keyframes acousticWave {
+  0%, 100% {
+    transform: scaleY(0.35);
+    opacity: 0.65;
+  }
+  50% {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+}
+
+/* Lithography Scanner laser sweep overlay - lightweight static top accent */
+.litho-scanner-overlay {
+  position: relative;
+  overflow: hidden;
+}
+
+/* Lithography Laser Line Top Accent with Smooth Flowing Spectrum */
+.litho-laser-line {
+  position: relative;
+}
+.litho-laser-line::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, #38bdf8, #facc15, #a855f7, #38bdf8);
+  background-size: 200% 100%;
+  animation: lithoLaserFlow 5s linear infinite;
+  will-change: background-position;
+  z-index: 20;
+}
+
+.litho-border-scan {
+  position: relative;
+  border-color: rgba(56, 189, 248, 0.42) !important;
+  transition: border-color 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+              box-shadow 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+              transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: border-color, box-shadow;
+}
+
+.litho-border-scan:hover {
+  border-color: rgba(250, 204, 21, 0.68) !important;
+  box-shadow: 0 8px 28px -6px rgba(56, 189, 248, 0.25), 0 0 15px -3px rgba(250, 204, 21, 0.18);
+}
+
+/* Tactile Micro-Interaction & GPU Smoothness Utilities */
+.gpu-smooth {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  will-change: transform, opacity;
+}
+
+.acoustic-bar {
+  transform-origin: bottom;
+  animation: acousticWave 0.65s ease-in-out infinite;
+}
+
+/* Strict Layout Overflow Prevention Rules */
+.strict-container {
+  max-width: 100% !important;
+  min-width: 0 !important;
+  overflow-x: hidden !important;
+}
+
+.shrink-strict {
+  flex-shrink: 1 !important;
+  min-width: 0 !important;
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.24s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.animate-pulse-glow {
+  animation: pulseGlow 2.2s infinite ease-in-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .litho-laser-line::before,
+  .animate-pulse-glow,
+  .acoustic-bar {
+    animation: none !important;
+  }
+}
+
+/* Global Scrollbar Aesthetics */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #020617;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #38bdf8;
+}
+
+/* Graceful Compact Mode Styles without harsh !important padding overrides */
+.compact-mode .py-compact {
+  padding-top: 0.375rem !important;
+  padding-bottom: 0.375rem !important;
+}
+
+.compact-mode .px-compact {
+  padding-left: 0.5rem !important;
+  padding-right: 0.5rem !important;
+}
+
+.compact-mode .gap-compact {
+  gap: 0.375rem !important;
+}
+
+/* =========================================================
+   Cleanroom High Contrast Mode (無塵室高對比專用模式)
+   Deep pitch black backgrounds (#000000 / #050811),
+   Ultra-high luminescence text (#ffffff / #f8fafc),
+   Solid sharp high-contrast border outlines (#475569 / #64748b),
+   Vibrant yellow/amber/cyan tags for cleanroom yellow light,
+   glare prevention & anti-washout legibility.
+========================================================= */
+html[data-contrast-mode="high-contrast"],
+.cleanroom-high-contrast {
+  --bg-main: #000000 !important;
+  --card-bg: #040814 !important;
+  --border-main: #64748b !important;
+  --text-main: #ffffff !important;
+}
+
+html[data-contrast-mode="high-contrast"] body,
+.cleanroom-high-contrast body {
+  background-color: #000000 !important;
+  color: #ffffff !important;
+}
+
+/* High contrast background overrides */
+html[data-contrast-mode="high-contrast"] .bg-slate-950,
+html[data-contrast-mode="high-contrast"] .bg-slate-950\/95,
+html[data-contrast-mode="high-contrast"] .bg-slate-950\/90,
+html[data-contrast-mode="high-contrast"] .bg-slate-950\/85,
+html[data-contrast-mode="high-contrast"] .bg-slate-950\/80,
+html[data-contrast-mode="high-contrast"] .bg-slate-950\/70,
+html[data-contrast-mode="high-contrast"] .bg-slate-950\/60 {
+  background-color: #000000 !important;
+}
+
+html[data-contrast-mode="high-contrast"] .bg-slate-900,
+html[data-contrast-mode="high-contrast"] .bg-slate-900\/95,
+html[data-contrast-mode="high-contrast"] .bg-slate-900\/90,
+html[data-contrast-mode="high-contrast"] .bg-slate-900\/80,
+html[data-contrast-mode="high-contrast"] .bg-slate-850 {
+  background-color: #080d1a !important;
+}
+
+html[data-contrast-mode="high-contrast"] .bg-slate-800,
+html[data-contrast-mode="high-contrast"] .bg-slate-800\/90,
+html[data-contrast-mode="high-contrast"] .bg-slate-800\/80 {
+  background-color: #0f172a !important;
+}
+
+/* High contrast border overrides */
+html[data-contrast-mode="high-contrast"] .border-slate-800,
+html[data-contrast-mode="high-contrast"] .border-slate-800\/90,
+html[data-contrast-mode="high-contrast"] .border-slate-800\/80,
+html[data-contrast-mode="high-contrast"] .border-slate-800\/70,
+html[data-contrast-mode="high-contrast"] .border-slate-800\/60,
+html[data-contrast-mode="high-contrast"] .border-slate-700 {
+  border-color: #475569 !important;
+  border-width: 1.5px;
+}
+
+/* High contrast text overrides */
+html[data-contrast-mode="high-contrast"] .text-slate-400 {
+  color: #e2e8f0 !important; /* Crisp light gray with high contrast ratio > 10:1 */
+  font-weight: 500;
+}
+
+html[data-contrast-mode="high-contrast"] .text-slate-500 {
+  color: #cbd5e1 !important; /* Solid visible subtext */
+  font-weight: 500;
+}
+
+html[data-contrast-mode="high-contrast"] .text-slate-300 {
+  color: #f8fafc !important; /* Maximum brightness off-white */
+}
+
+html[data-contrast-mode="high-contrast"] .text-slate-200,
+html[data-contrast-mode="high-contrast"] .text-slate-100 {
+  color: #ffffff !important;
+}
+
+/* High contrast accented highlight boosts */
+html[data-contrast-mode="high-contrast"] .text-amber-400,
+html[data-contrast-mode="high-contrast"] .text-amber-300 {
+  color: #fde047 !important; /* Luminous laser lemon yellow */
+  text-shadow: 0 0 1px rgba(0,0,0,0.8);
+}
+
+html[data-contrast-mode="high-contrast"] .text-cyan-400,
+html[data-contrast-mode="high-contrast"] .text-cyan-300 {
+  color: #38bdf8 !important; /* Crisp high-vis cyan */
+}
+
+html[data-contrast-mode="high-contrast"] .text-emerald-400,
+html[data-contrast-mode="high-contrast"] .text-emerald-300 {
+  color: #4ade80 !important; /* Crisp high-vis emerald */
+}
+
+html[data-contrast-mode="high-contrast"] .text-rose-400,
+html[data-contrast-mode="high-contrast"] .text-rose-300 {
+  color: #fb7185 !important;
+}
+
+/* High contrast button and card focus rings */
+html[data-contrast-mode="high-contrast"] button:focus-visible,
+html[data-contrast-mode="high-contrast"] a:focus-visible {
+  outline: 2px solid #fde047 !important;
+  outline-offset: 2px;
+}
+
+/* =========================================================
+   Mobile Ergonomics & Touch Optimization
+   - Eliminates 300ms tap delay
+   - Hardware-accelerated smooth scrolling
+   - iOS notch / home indicator safe area support
+========================================================= */
+@supports (padding: max(0px)) {
+  .pb-safe {
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  }
+  .pt-safe {
+    padding-top: max(1rem, env(safe-area-inset-top));
+  }
+}
+
+button, a, input, select, textarea {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.scroll-touch {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* =========================================================
+   Ultra-Compact HUD & Flush-to-Frame Layout Optimization
+   - Snug seamless bottom docking without borders leaking
+   - High visual density, clean edges, zero dead vertical gaps
+========================================================= */
+.flush-bottom-dock {
+  margin-left: -0.625rem;
+  margin-right: -0.625rem;
+  margin-bottom: 0 !important;
+  margin-top: auto;
+  border-bottom-left-radius: 0.875rem;
+  border-bottom-right-radius: 0.875rem;
+}
+
+@media (min-width: 640px) {
+  .flush-bottom-dock {
+    margin-left: -0.875rem;
+    margin-right: -0.875rem;
+  }
+}
+
+.tight-layout {
+  letter-spacing: -0.015em;
+}
+
+.tight-layout * {
+  box-sizing: border-box;
+}

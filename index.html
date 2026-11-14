@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="zh-TW">
+  <head>
+    <script>
+      (function () {
+        if (typeof window === 'undefined') return;
+        // 1. Intercept Vite HMR WebSocket creation so it never errors in non-HMR iframe environments
+        var NativeWebSocket = window.WebSocket;
+        if (NativeWebSocket) {
+          var SafeWebSocket = function (url, protocols) {
+            var protoStr = Array.isArray(protocols) ? protocols.join(',') : String(protocols || '');
+            var urlStr = String(url || '');
+            if (protoStr.indexOf('vite-hmr') !== -1 || protoStr.indexOf('vite-ping') !== -1 || urlStr.indexOf('vite') !== -1) {
+              var dummy = {
+                url: urlStr,
+                readyState: 1,
+                protocol: protoStr,
+                extensions: '',
+                bufferedAmount: 0,
+                binaryType: 'blob',
+                onopen: null,
+                onerror: null,
+                onclose: null,
+                onmessage: null,
+                send: function () {},
+                close: function () {},
+                addEventListener: function () {},
+                removeEventListener: function () {},
+                dispatchEvent: function () { return true; }
+              };
+              return dummy;
+            }
+            return protocols !== undefined ? new NativeWebSocket(url, protocols) : new NativeWebSocket(url);
+          };
+          SafeWebSocket.prototype = NativeWebSocket.prototype;
+          SafeWebSocket.CONNECTING = NativeWebSocket.CONNECTING;
+          SafeWebSocket.OPEN = NativeWebSocket.OPEN;
+          SafeWebSocket.CLOSING = NativeWebSocket.CLOSING;
+          SafeWebSocket.CLOSED = NativeWebSocket.CLOSED;
+          try {
+            window.WebSocket = SafeWebSocket;
+          } catch (e) {}
+        }
+
+        // 2. Filter any residual Vite WebSocket console noise
+        var origError = console.error;
+        var origWarn = console.warn;
+        function isViteWsNoise(args) {
+          try {
+            var msg = Array.prototype.slice.call(args).map(function (a) {
+              return typeof a === 'string' ? a : (a && a.message) ? a.message : String(a);
+            }).join(' ');
+            return msg.indexOf('failed to connect to websocket') !== -1 ||
+              msg.indexOf('WebSocket closed without opened') !== -1 ||
+              (msg.indexOf('[vite]') !== -1 && msg.indexOf('websocket') !== -1);
+          } catch (e) {
+            return false;
+          }
+        }
+        console.error = function () {
+          if (isViteWsNoise(arguments)) return;
+          return origError.apply(console, arguments);
+        };
+        console.warn = function () {
+          if (isViteWsNoise(arguments)) return;
+          return origWarn.apply(console, arguments);
+        };
+        window.addEventListener('unhandledrejection', function (event) {
+          var reason = event && event.reason;
+          var msg = reason ? (reason.message || String(reason)) : '';
+          if (msg.indexOf('WebSocket closed without opened') !== -1 || msg.indexOf('websocket') !== -1) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+          }
+        }, true);
+      })();
+    </script>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FSE Studio | FSE 每日晶圓級英文導師</title>
+    <meta name="description" content="專為科技業與半導體工程師（FSE）打造的英文學習平台。結合國小拆解法、擬真台味諧音與晶圓廠維修實情境。" />
+    <link rel="canonical" href="https://fse-studio.ai.studio/" />
+    <meta property="og:title" content="FSE Studio | FSE 每日晶圓級英文導師" />
+    <meta property="og:description" content="專為科技業與半導體工程師（FSE）打造的英文學習平台。結合國小拆解法、擬真台味諧音與晶圓廠維修實情境。" />
+    <meta property="og:url" content="https://fse-studio.ai.studio/" />
+    <meta property="og:type" content="website" />
+    <meta name="theme-color" content="#020617" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="FSE Studio" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="alternate icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="apple-touch-icon" href="/icon.svg" />
+    <link rel="manifest" href="/manifest.json" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

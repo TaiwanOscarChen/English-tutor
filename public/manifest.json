@@ -1,0 +1,21 @@
+{
+  "name": "FSE Studio - 每日晶圓級英文導師",
+  "short_name": "FSE Studio",
+  "description": "專為科技業與半導體工程師（FSE）打造的英文學習平台。結合國小拆解法、擬真台味諧音與晶圓廠維修實情境。",
+  "start_url": "https://fse-studio.ai.studio/",
+  "id": "https://fse-studio.ai.studio/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#020617",
+  "theme_color": "#020617",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["education", "productivity", "utilities"]
+}

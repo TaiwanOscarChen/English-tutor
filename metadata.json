@@ -1,0 +1,6 @@
+{
+  "name": "FSE 每日晶圓級英文導師",
+  "description": "專為科技業與半導體工程師（FSE）打造的英文學習平台。結合國小拆解法、擬真台味諧音與晶圓廠維修實情境。",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

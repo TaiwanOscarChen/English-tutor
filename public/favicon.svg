@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <!-- Deep Obsidian Cleanroom Gradient -->
+    <linearGradient id="fav-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#020617"/>
+      <stop offset="50%" stop-color="#0a1228"/>
+      <stop offset="100%" stop-color="#020817"/>
+    </linearGradient>
+
+    <!-- 24K Wafer Gold Bevel -->
+    <linearGradient id="fav-gold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fef08a"/>
+      <stop offset="30%" stop-color="#fbbf24"/>
+      <stop offset="70%" stop-color="#f59e0b"/>
+      <stop offset="100%" stop-color="#b45309"/>
+    </linearGradient>
+
+    <!-- Cleanroom Argon Laser Cyan -->
+    <linearGradient id="fav-cyan" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#a5f3fc"/>
+      <stop offset="50%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#0284c7"/>
+    </linearGradient>
+
+    <!-- Ultra High-Contrast Text Gradient -->
+    <linearGradient id="fav-text" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="45%" stop-color="#fef08a"/>
+      <stop offset="100%" stop-color="#fbbf24"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Squircle Silicon Chip Container -->
+  <rect width="64" height="64" rx="14" fill="url(#fav-bg)"/>
+  <rect width="62" height="62" x="1" y="1" rx="13" fill="none" stroke="url(#fav-gold)" stroke-width="1.8" stroke-opacity="0.85"/>
+
+  <!-- 300mm Silicon Wafer Outer Ring -->
+  <circle cx="32" cy="32" r="25" fill="#040914" stroke="url(#fav-gold)" stroke-width="2.5"/>
+  <circle cx="32" cy="32" r="22.5" fill="none" stroke="url(#fav-cyan)" stroke-width="1" stroke-dasharray="3 2" stroke-opacity="0.95"/>
+
+  <!-- Wafer Orientation Notch (Top Center) -->
+  <path d="M 28 7 L 36 7 L 35 10 L 29 10 Z" fill="url(#fav-gold)"/>
+
+  <!-- Central Silicon Die Carrier -->
+  <rect x="18" y="18" width="28" height="28" rx="6" fill="#080e22" stroke="url(#fav-gold)" stroke-width="1.8"/>
+  <rect x="20" y="20" width="24" height="24" rx="4.5" fill="none" stroke="url(#fav-cyan)" stroke-width="0.8" stroke-opacity="0.85"/>
+
+  <!-- 4 Corner Precision Laser Fiducial Nodes -->
+  <circle cx="21.5" cy="21.5" r="1.2" fill="#38bdf8"/>
+  <circle cx="42.5" cy="21.5" r="1.2" fill="#38bdf8"/>
+  <circle cx="21.5" cy="42.5" r="1.2" fill="#38bdf8"/>
+  <circle cx="42.5" cy="42.5" r="1.2" fill="#fbbf24"/>
+
+  <!-- Ultra Crisp Bold High-Contrast FSE Typography -->
+  <!-- Subtle dark drop shadow for maximum legibility in browser tabs -->
+  <text x="32" y="37.5"
+        font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+        font-size="13.5"
+        font-weight="900"
+        fill="#020617"
+        text-anchor="middle"
+        letter-spacing="-0.5">FSE</text>
+  <text x="32" y="36.5"
+        font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+        font-size="13.5"
+        font-weight="900"
+        fill="url(#fav-text)"
+        text-anchor="middle"
+        letter-spacing="-0.5">FSE</text>
+</svg>
