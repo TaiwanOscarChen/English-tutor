@@ -24,39 +24,67 @@ import { TypographyOptimizer } from './components/TypographyOptimizer';
 import { MobileBottomNav } from './components/MobileBottomNav';
 import { OfflineSyncPromptBar } from './components/OfflineSyncPromptBar';
 
+// Resilient dynamic import helper: retries once and triggers single safe reload on stale chunk mismatch
+function lazyWithRetry<T extends React.ComponentType<any>>(
+  factory: () => Promise<{ default: T }>
+): React.LazyExoticComponent<T> {
+  return lazy(async () => {
+    try {
+      return await factory();
+    } catch (firstErr) {
+      await new Promise((r) => setTimeout(r, 250));
+      try {
+        return await factory();
+      } catch (secondErr) {
+        if (typeof window !== 'undefined') {
+          try {
+            const lastReloadAt = Number(sessionStorage.getItem('fse_chunk_reload_at') || '0');
+            if (Date.now() - lastReloadAt > 30_000) {
+              sessionStorage.setItem('fse_chunk_reload_at', String(Date.now()));
+              window.location.reload();
+              return new Promise<never>(() => {});
+            }
+          } catch {}
+        }
+        throw secondErr ?? firstErr;
+      }
+    }
+  });
+}
+
 // Code-split secondary tabs (loaded on demand to keep first-paint bundle lean)
-const FabVocabBank = lazy(() => import('./components/FabVocabBank').then((m) => ({ default: m.FabVocabBank })));
-const CleanroomArticlesTab = lazy(() => import('./components/CleanroomArticlesTab').then((m) => ({ default: m.CleanroomArticlesTab })));
-const FabEmergencySection = lazy(() => import('./components/FabEmergencySection').then((m) => ({ default: m.FabEmergencySection })));
-const FabScenarioSection = lazy(() => import('./components/FabScenarioSection').then((m) => ({ default: m.FabScenarioSection })));
-const CleanroomSpeechShadowing = lazy(() => import('./components/CleanroomSpeechShadowing').then((m) => ({ default: m.CleanroomSpeechShadowing })));
-const FabVendorEquipmentHub = lazy(() => import('./components/FabVendorEquipmentHub').then((m) => ({ default: m.FabVendorEquipmentHub })));
-const BookmarksTab = lazy(() => import('./components/BookmarksTab').then((m) => ({ default: m.BookmarksTab })));
-const DriveModeTab = lazy(() => import('./components/DriveModeTab').then((m) => ({ default: m.DriveModeTab })));
-const DiagnosticsAndRemediation = lazy(() => import('./components/DiagnosticsAndRemediation').then((m) => ({ default: m.DiagnosticsAndRemediation })));
-const AchievementTree = lazy(() => import('./components/AchievementTree').then((m) => ({ default: m.AchievementTree })));
-const AiLessonGenerator = lazy(() => import('./components/AiLessonGenerator').then((m) => ({ default: m.AiLessonGenerator })));
-const AiTutorChat = lazy(() => import('./components/AiTutorChat').then((m) => ({ default: m.AiTutorChat })));
+const FabVocabBank = lazyWithRetry(() => import('./components/FabVocabBank').then((m) => ({ default: m.FabVocabBank })));
+const CleanroomArticlesTab = lazyWithRetry(() => import('./components/CleanroomArticlesTab').then((m) => ({ default: m.CleanroomArticlesTab })));
+const FabEmergencySection = lazyWithRetry(() => import('./components/FabEmergencySection').then((m) => ({ default: m.FabEmergencySection })));
+const FabScenarioSection = lazyWithRetry(() => import('./components/FabScenarioSection').then((m) => ({ default: m.FabScenarioSection })));
+const CleanroomSpeechShadowing = lazyWithRetry(() => import('./components/CleanroomSpeechShadowing').then((m) => ({ default: m.CleanroomSpeechShadowing })));
+const FabVendorEquipmentHub = lazyWithRetry(() => import('./components/FabVendorEquipmentHub').then((m) => ({ default: m.FabVendorEquipmentHub })));
+const BookmarksTab = lazyWithRetry(() => import('./components/BookmarksTab').then((m) => ({ default: m.BookmarksTab })));
+const DriveModeTab = lazyWithRetry(() => import('./components/DriveModeTab').then((m) => ({ default: m.DriveModeTab })));
+const DiagnosticsAndRemediation = lazyWithRetry(() => import('./components/DiagnosticsAndRemediation').then((m) => ({ default: m.DiagnosticsAndRemediation })));
+const AchievementTree = lazyWithRetry(() => import('./components/AchievementTree').then((m) => ({ default: m.AchievementTree })));
+const AiLessonGenerator = lazyWithRetry(() => import('./components/AiLessonGenerator').then((m) => ({ default: m.AiLessonGenerator })));
+const AiTutorChat = lazyWithRetry(() => import('./components/AiTutorChat').then((m) => ({ default: m.AiTutorChat })));
 
 // Code-split modals (mounted and loaded only when opened)
-const InteractiveGuideModal = lazy(() => import('./components/InteractiveGuideModal').then((m) => ({ default: m.InteractiveGuideModal })));
-const QuickCheatSheetModal = lazy(() => import('./components/QuickCheatSheetModal').then((m) => ({ default: m.QuickCheatSheetModal })));
-const SpeechPracticeModal = lazy(() => import('./components/SpeechPracticeModal').then((m) => ({ default: m.SpeechPracticeModal })));
-const CleanroomBadgeModal = lazy(() => import('./components/CleanroomBadgeModal').then((m) => ({ default: m.CleanroomBadgeModal })));
-const AiErrorCodeGeneratorModal = lazy(() => import('./components/AiErrorCodeGeneratorModal').then((m) => ({ default: m.AiErrorCodeGeneratorModal })));
-const AiQuickDecomposerModal = lazy(() => import('./components/AiQuickDecomposerModal').then((m) => ({ default: m.AiQuickDecomposerModal })));
-const VoiceSettingsModal = lazy(() => import('./components/VoiceSettingsModal').then((m) => ({ default: m.VoiceSettingsModal })));
-const OfflineCacheModal = lazy(() => import('./components/OfflineCacheModal').then((m) => ({ default: m.OfflineCacheModal })));
-const FabEmergencyModal = lazy(() => import('./components/FabEmergencyModal').then((m) => ({ default: m.FabEmergencyModal })));
-const FabScenarioSimulatorModal = lazy(() => import('./components/FabScenarioSimulatorModal').then((m) => ({ default: m.FabScenarioSimulatorModal })));
-const GlobalCommandPaletteModal = lazy(() => import('./components/GlobalCommandPaletteModal').then((m) => ({ default: m.GlobalCommandPaletteModal })));
-const VocabMatchGameModal = lazy(() => import('./components/VocabMatchGameModal').then((m) => ({ default: m.VocabMatchGameModal })));
-const KeyboardShortcutsModal = lazy(() => import('./components/KeyboardShortcutsModal').then((m) => ({ default: m.KeyboardShortcutsModal })));
-const SystemDataBackupModal = lazy(() => import('./components/SystemDataBackupModal').then((m) => ({ default: m.SystemDataBackupModal })));
-const SystemHealthModal = lazy(() => import('./components/SystemHealthModal').then((m) => ({ default: m.SystemHealthModal })));
-const CustomMediaImportModal = lazy(() => import('./components/CustomMediaImportModal').then((m) => ({ default: m.CustomMediaImportModal })));
-const CleanroomScenarioModal = lazy(() => import('./components/CleanroomScenarioModal').then((m) => ({ default: m.CleanroomScenarioModal })));
-const ShiftHandoverTimedDrillModal = lazy(() => import('./components/ShiftHandoverTimedDrillModal').then((m) => ({ default: m.ShiftHandoverTimedDrillModal })));
+const InteractiveGuideModal = lazyWithRetry(() => import('./components/InteractiveGuideModal').then((m) => ({ default: m.InteractiveGuideModal })));
+const QuickCheatSheetModal = lazyWithRetry(() => import('./components/QuickCheatSheetModal').then((m) => ({ default: m.QuickCheatSheetModal })));
+const SpeechPracticeModal = lazyWithRetry(() => import('./components/SpeechPracticeModal').then((m) => ({ default: m.SpeechPracticeModal })));
+const CleanroomBadgeModal = lazyWithRetry(() => import('./components/CleanroomBadgeModal').then((m) => ({ default: m.CleanroomBadgeModal })));
+const AiErrorCodeGeneratorModal = lazyWithRetry(() => import('./components/AiErrorCodeGeneratorModal').then((m) => ({ default: m.AiErrorCodeGeneratorModal })));
+const AiQuickDecomposerModal = lazyWithRetry(() => import('./components/AiQuickDecomposerModal').then((m) => ({ default: m.AiQuickDecomposerModal })));
+const VoiceSettingsModal = lazyWithRetry(() => import('./components/VoiceSettingsModal').then((m) => ({ default: m.VoiceSettingsModal })));
+const OfflineCacheModal = lazyWithRetry(() => import('./components/OfflineCacheModal').then((m) => ({ default: m.OfflineCacheModal })));
+const FabEmergencyModal = lazyWithRetry(() => import('./components/FabEmergencyModal').then((m) => ({ default: m.FabEmergencyModal })));
+const FabScenarioSimulatorModal = lazyWithRetry(() => import('./components/FabScenarioSimulatorModal').then((m) => ({ default: m.FabScenarioSimulatorModal })));
+const GlobalCommandPaletteModal = lazyWithRetry(() => import('./components/GlobalCommandPaletteModal').then((m) => ({ default: m.GlobalCommandPaletteModal })));
+const VocabMatchGameModal = lazyWithRetry(() => import('./components/VocabMatchGameModal').then((m) => ({ default: m.VocabMatchGameModal })));
+const KeyboardShortcutsModal = lazyWithRetry(() => import('./components/KeyboardShortcutsModal').then((m) => ({ default: m.KeyboardShortcutsModal })));
+const SystemDataBackupModal = lazyWithRetry(() => import('./components/SystemDataBackupModal').then((m) => ({ default: m.SystemDataBackupModal })));
+const SystemHealthModal = lazyWithRetry(() => import('./components/SystemHealthModal').then((m) => ({ default: m.SystemHealthModal })));
+const CustomMediaImportModal = lazyWithRetry(() => import('./components/CustomMediaImportModal').then((m) => ({ default: m.CustomMediaImportModal })));
+const CleanroomScenarioModal = lazyWithRetry(() => import('./components/CleanroomScenarioModal').then((m) => ({ default: m.CleanroomScenarioModal })));
+const ShiftHandoverTimedDrillModal = lazyWithRetry(() => import('./components/ShiftHandoverTimedDrillModal').then((m) => ({ default: m.ShiftHandoverTimedDrillModal })));
 import { ToastProvider } from './context/ToastContext';
 import { useThreeDayAutoUpdate } from './hooks/useThreeDayAutoUpdate';
 import { useOfflineStatus } from './hooks/useOfflineStatus';

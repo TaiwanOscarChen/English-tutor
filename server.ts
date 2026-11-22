@@ -3828,6 +3828,12 @@ async function startServer() {
       })
     );
     app.get("*", (req, res) => {
+      if (
+        req.path.startsWith("/assets/") ||
+        /\.(?:js|mjs|css|map|json|svg|png|jpg|jpeg|webp|ico|woff2?)$/i.test(req.path)
+      ) {
+        return res.status(404).type("text/plain").send("Asset not found");
+      }
       res.setHeader("Cache-Control", "no-cache");
       res.sendFile(path.join(distPath, "index.html"));
     });

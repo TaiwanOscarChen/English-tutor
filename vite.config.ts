@@ -51,6 +51,12 @@ export default defineConfig(() => {
             if (id.includes('/src/data/')) {
               return 'curriculum-data';
             }
+            if (id.includes('/src/utils/speech.ts')) {
+              return 'speech-engine';
+            }
+            if (id.includes('/src/utils/wordDictionary.ts')) {
+              return 'word-dictionary';
+            }
           },
         },
       },

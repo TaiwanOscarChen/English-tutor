@@ -7,6 +7,7 @@ import { loadSrsMap, isLessonDueForReview, SrsCardState } from '../utils/srsSche
 import { PRESET_LESSONS, getActivePresetLessons } from '../data/presetLessons';
 import { speakEnglish } from '../utils/speech';
 import { CurriculumQualitySuite } from './CurriculumQualitySuite';
+import { SpeechLatencyLiveMonitor } from './SpeechLatencyLiveMonitor';
 import {
   loadPronunciationAnalytics,
   computePronunciationInsights,
@@ -1051,6 +1052,9 @@ export const DiagnosticsAndRemediation: React.FC<DiagnosticsAndRemediationProps>
           ))}
         </div>
       </div>
+
+      {/* Real-Time Web Audio Buffer Latency & Audio Segment Efficiency Monitor (Speech-Latency-Live-Monitor) */}
+      <SpeechLatencyLiveMonitor speechSpeed={speechSpeed} />
 
       {/* Full Curriculum TTS Stress Test (Latency-Report) & Elementary Decomposition AI Audit */}
       <CurriculumQualitySuite

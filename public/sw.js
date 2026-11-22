@@ -1,6 +1,6 @@
 // FSE Semiconductor English PWA Service Worker
-const STATIC_CACHE_NAME = 'fse-semiconductor-static-v4';
-const RUNTIME_CACHE_NAME = 'fse-semiconductor-runtime-v4';
+const STATIC_CACHE_NAME = 'fse-semiconductor-static-v5';
+const RUNTIME_CACHE_NAME = 'fse-semiconductor-runtime-v5';
 const MAX_RUNTIME_CACHE_ENTRIES = 120;
 
 const STATIC_ASSETS = [
@@ -137,11 +137,16 @@ self.addEventListener('fetch', (event) => {
       const cachedResponse = await caches.match(event.request);
       const fetchPromise = fetch(event.request)
         .then(async (networkResponse) => {
-          if (
+          const contentType = networkResponse.headers.get('content-type') || '';
+          const isCodeAsset =
+            url.pathname.startsWith('/assets/') ||
+            /\.(?:js|mjs|css)$/i.test(url.pathname);
+          const isValidAssetResponse =
             networkResponse &&
             networkResponse.status === 200 &&
-            networkResponse.type === 'basic'
-          ) {
+            networkResponse.type === 'basic' &&
+            (!isCodeAsset || !contentType.includes('text/html'));
+          if (isValidAssetResponse) {
             const responseToCache = networkResponse.clone();
             const cache = await caches.open(RUNTIME_CACHE_NAME);
             await cache.put(event.request, responseToCache);

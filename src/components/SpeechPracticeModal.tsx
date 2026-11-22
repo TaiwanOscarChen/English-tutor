@@ -24,7 +24,10 @@ import {
   Wind,
   Gauge,
   TrendingUp,
-  Target
+  Target,
+  BookMarked,
+  Trash2,
+  AudioWaveform
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import {
@@ -75,6 +78,17 @@ import {
   computePronunciationInsights,
 } from '../utils/pronunciationAnalytics';
 import { queueAutoServerSync } from '../utils/serverSyncService';
+import {
+  AiPhoneticAlignmentReport,
+  MicSpectralFrame,
+  WeaknessVocabEntry,
+  WEAKNESS_VOCAB_UPDATED_EVENT,
+  runAiPhoneticAlignment,
+  loadWeaknessVocabList,
+  removeWeaknessVocabWord,
+  clearWeaknessVocabList,
+} from '../utils/aiPhoneticAlignment';
+import { getWordKKPhonetic } from '../utils/wordDictionary';
 
 interface SpeechPracticeModalProps {
   isOpen: boolean;
@@ -140,6 +154,14 @@ export const SpeechPracticeModal: React.FC<SpeechPracticeModalProps> = ({
   );
   const [showPronunciationHistory, setShowPronunciationHistory] = useState<boolean>(false);
 
+  // AI-Phonetic-Alignment (KK 音標聲學對齊) 與 Weakness-Vocab-List 狀態
+  const [aiPhoneticAlignmentEnabled, setAiPhoneticAlignmentEnabled] = useState<boolean>(true);
+  const [alignmentReport, setAlignmentReport] = useState<AiPhoneticAlignmentReport | null>(null);
+  const [weaknessVocabList, setWeaknessVocabList] = useState<WeaknessVocabEntry[]>(() =>
+    loadWeaknessVocabList()
+  );
+  const [showWeaknessVocabList, setShowWeaknessVocabList] = useState<boolean>(false);
+
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recognitionRef = useRef<any>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -149,6 +171,8 @@ export const SpeechPracticeModal: React.FC<SpeechPracticeModalProps> = ({
   const rawMicStreamRef = useRef<MediaStream | null>(null);
   const targetSpectrumProfileRef = useRef<TargetSpectrumProfile>(buildTargetSentenceSpectrumProfile(sentence || ''));
   const spectrumMatcherRef = useRef<RealtimeSpectrumMatcher | null>(null);
+  const micSpectralFramesRef = useRef<MicSpectralFrame[]>([]);
+  const recordingStartPerfRef = useRef<number>(0);
   const animationFrameRef = useRef<number | null>(null);
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
   const localVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
@@ -285,12 +309,27 @@ export const SpeechPracticeModal: React.FC<SpeechPracticeModalProps> = ({
     setRecordedNoiseReductionDb(null);
     setLiveSimilarity(null);
     setFinalSpectralSummary(null);
+    setAlignmentReport(null);
+    micSpectralFramesRef.current = [];
+    setWeaknessVocabList(loadWeaknessVocabList());
     setPronunciationInsights(computePronunciationInsights(loadPronunciationAnalytics()));
 
     return () => {
       isCurrentEffect = false;
     };
   }, [isOpen, sentence]);
+
+  // 監聽跨元件 Weakness-Vocab-List 更新事件
+  useEffect(() => {
+    if (typeof window === 'undefined' || !isOpen) return;
+    const handleWeaknessSync = () => {
+      setWeaknessVocabList(loadWeaknessVocabList());
+    };
+    window.addEventListener(WEAKNESS_VOCAB_UPDATED_EVENT, handleWeaknessSync);
+    return () => {
+      window.removeEventListener(WEAKNESS_VOCAB_UPDATED_EVENT, handleWeaknessSync);
+    };
+  }, [isOpen]);
 
   // 同步全域語速設定
   useEffect(() => {
@@ -391,12 +430,22 @@ export const SpeechPracticeModal: React.FC<SpeechPracticeModalProps> = ({
       const bufferLength = analyser.frequencyBinCount;
       const dataArray = new Uint8Array(new ArrayBuffer(bufferLength));
       let lastMeterUpdateTs = 0;
+      let lastFramePushTs = 0;
 
       const updateSpectrum = () => {
         analyser.getByteFrequencyData(dataArray);
         const snap = matcher.pushFrequencyFrame(dataArray, audioCtx.sampleRate || 48000);
         setWaveHeights(snap.userBars);
         const now = performance.now();
+        if (now - lastFramePushTs > 42 && micSpectralFramesRef.current.length < 400) {
+          micSpectralFramesRef.current.push({
+            timestampMs: Math.max(0, Math.round(now - recordingStartPerfRef.current)),
+            bands: [...snap.userBars],
+            similarity: snap.similarity,
+            isVoiceDetected: snap.isVoiceDetected,
+          });
+          lastFramePushTs = now;
+        }
         if (now - lastMeterUpdateTs > 85) {
           setLiveSimilarity(snap);
           lastMeterUpdateTs = now;
@@ -516,7 +565,10 @@ export const SpeechPracticeModal: React.FC<SpeechPracticeModalProps> = ({
     setRecordedWithNoiseSuppression(false);
     setRecordedNoiseReductionDb(null);
     setFinalSpectralSummary(null);
+    setAlignmentReport(null);
     audioChunksRef.current = [];
+    micSpectralFramesRef.current = [];
+    recordingStartPerfRef.current = performance.now();
 
     const activeProfile = targetSpectrumProfileRef.current || buildTargetSentenceSpectrumProfile(sentence);
     const matcher = new RealtimeSpectrumMatcher(activeProfile);
@@ -641,12 +693,22 @@ export const SpeechPracticeModal: React.FC<SpeechPracticeModalProps> = ({
             recordingStream = activePipeline.processedStream;
 
             let lastUiUpdateTs = 0;
+            let lastFramePushTs = 0;
             const updateDenoisedSpectrum = () => {
               if (!denoisePipelineRef.current) return;
               const metrics = denoisePipelineRef.current.sampleMetrics();
               const snap = matcher.pushFrequencyFrame(metrics.freqData, metrics.sampleRate);
               setWaveHeights(snap.userBars);
               const now = performance.now();
+              if (now - lastFramePushTs > 42 && micSpectralFramesRef.current.length < 400) {
+                micSpectralFramesRef.current.push({
+                  timestampMs: Math.max(0, Math.round(now - recordingStartPerfRef.current)),
+                  bands: [...snap.userBars],
+                  similarity: snap.similarity,
+                  isVoiceDetected: snap.isVoiceDetected,
+                });
+                lastFramePushTs = now;
+              }
               if (now - lastUiUpdateTs > 85) {
                 setLiveNoiseReductionDb(metrics.attenuationDb);
                 setLiveSimilarity(snap);
@@ -742,6 +804,26 @@ export const SpeechPracticeModal: React.FC<SpeechPracticeModalProps> = ({
               : textCalcScore;
           setScore(calcScore);
           setHasRecorded(true);
+
+          // AI-Phonetic-Alignment：以麥克風共振峰訊號對比目標句 KK 音標，並自動存入 Weakness-Vocab-List
+          if (aiPhoneticAlignmentEnabled) {
+            try {
+              const kkReport = runAiPhoneticAlignment({
+                targetSentence: sentence,
+                recognizedTranscript: finalTranscript,
+                spectralFrames: micSpectralFramesRef.current,
+                isOfflineAcoustic,
+                autoPersistWeakness: true,
+              });
+              setAlignmentReport(kkReport);
+              setWeaknessVocabList(loadWeaknessVocabList());
+              if (kkReport.newlySavedWeakWords.length > 0) {
+                setShowWeaknessVocabList(true);
+              }
+            } catch (alignErr) {
+              console.warn('AI-Phonetic-Alignment error:', alignErr);
+            }
+          }
 
           // 記錄本次發音歷程與弱項音素統計，並排程跨裝置同步
           try {
@@ -841,6 +923,22 @@ export const SpeechPracticeModal: React.FC<SpeechPracticeModalProps> = ({
       setScore(calcScore);
       setUserTranscript(sentence);
       const { evals } = evaluateSpeechAccuracy(sentence, sentence, true);
+      if (aiPhoneticAlignmentEnabled) {
+        try {
+          const kkReport = runAiPhoneticAlignment({
+            targetSentence: sentence,
+            recognizedTranscript: sentence,
+            spectralFrames: [],
+            isOfflineAcoustic: true,
+            autoPersistWeakness: true,
+          });
+          setAlignmentReport(kkReport);
+          setWeaknessVocabList(loadWeaknessVocabList());
+          if (kkReport.newlySavedWeakWords.length > 0) {
+            setShowWeaknessVocabList(true);
+          }
+        } catch {}
+      }
       try {
         const updatedStore = recordPronunciationSession({
           sentence,
@@ -1079,6 +1177,68 @@ export const SpeechPracticeModal: React.FC<SpeechPracticeModalProps> = ({
                   </div>
                 </div>
               )}
+
+              {/* AI-Phonetic-Alignment Target KK Phonetics Strip */}
+              <div
+                id="ai-phonetic-alignment-header"
+                className="pt-2 border-t border-slate-800/80 space-y-2"
+              >
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-1.5 text-[11px] font-black text-indigo-300">
+                    <AudioWaveform className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                    <span>AI-Phonetic-Alignment</span>
+                    <span className="text-[10px] font-mono font-normal text-slate-400">
+                      (KK 音標麥克風聲學比對)
+                    </span>
+                  </div>
+                  <button
+                    id="ai-phonetic-alignment-toggle"
+                    type="button"
+                    role="switch"
+                    aria-checked={aiPhoneticAlignmentEnabled}
+                    disabled={isRecording}
+                    onClick={() => {
+                      playClickSound();
+                      setAiPhoneticAlignmentEnabled((prev) => !prev);
+                    }}
+                    className={`px-2.5 py-0.5 rounded-lg text-[10px] font-mono font-black border transition-all cursor-pointer disabled:opacity-50 ${
+                      aiPhoneticAlignmentEnabled
+                        ? 'bg-indigo-500/25 text-indigo-200 border-indigo-400/60'
+                        : 'bg-slate-900 text-slate-400 border-slate-700'
+                    }`}
+                  >
+                    {aiPhoneticAlignmentEnabled ? 'KK 對齊已啟用' : '已暫停對齊'}
+                  </button>
+                </div>
+
+                {aiPhoneticAlignmentEnabled && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {cleanEnglishText(sentence)
+                      .split(/\s+/)
+                      .map((raw) => raw.replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9'-]+$/g, ''))
+                      .filter((w) => w.length >= 2)
+                      .slice(0, 14)
+                      .map((word, idx) => {
+                        const kk = getWordKKPhonetic(word);
+                        return (
+                          <button
+                            key={`${word}-${idx}`}
+                            type="button"
+                            onClick={() => {
+                              playClickSound();
+                              speakEnglish(word, 0.72, undefined, 1.0, 80, true);
+                            }}
+                            title={`點擊以 0.72x 慢速試聽 "${word}" ${kk}`}
+                            className="px-2 py-0.5 rounded-lg bg-slate-900/90 hover:bg-indigo-950/80 border border-slate-800 hover:border-indigo-500/50 text-[10px] font-mono inline-flex items-center gap-1 cursor-pointer transition-colors"
+                          >
+                            <span className="text-slate-100 font-bold">{word}</span>
+                            <span className="text-indigo-300">{kk}</span>
+                          </button>
+                        );
+                      })}
+                  </div>
+                )}
+              </div>
 
               {/* Offline TTS Engine Notice Badge */}
               {isOfflineActive && (
@@ -1480,6 +1640,78 @@ export const SpeechPracticeModal: React.FC<SpeechPracticeModalProps> = ({
                   </div>
                 )}
 
+                {/* AI-Phonetic-Alignment KK Phonetic Alignment Report */}
+                {alignmentReport && alignmentReport.wordResults.length > 0 && (
+                  <div
+                    id="ai-phonetic-alignment-report"
+                    className="p-3 rounded-xl bg-slate-950/95 border border-indigo-500/40 space-y-2.5"
+                  >
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="flex items-center gap-1.5 text-xs font-black text-indigo-300">
+                        <AudioWaveform className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                        <span>AI-Phonetic-Alignment KK 音標對齊分析</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 font-mono text-[11px] tabular-nums">
+                        <span className="px-2 py-0.5 rounded bg-indigo-950/80 border border-indigo-500/40 text-indigo-200 font-bold">
+                          KK 對齊度 {alignmentReport.overallKkScore}%
+                        </span>
+                        {alignmentReport.newlySavedWeakWords.length > 0 && (
+                          <span className="px-2 py-0.5 rounded bg-rose-950/80 border border-rose-500/50 text-rose-300 font-bold">
+                            +{alignmentReport.newlySavedWeakWords.length} 已存 Weakness-Vocab-List
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5 max-h-48 overflow-y-auto pr-0.5 custom-scrollbar">
+                      {alignmentReport.wordResults.map((item, idx) => {
+                        const rowTone =
+                          item.status === 'accurate'
+                            ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-200'
+                            : item.status === 'borderline'
+                            ? 'bg-amber-950/40 border-amber-500/40 text-amber-200'
+                            : 'bg-rose-950/50 border-rose-500/50 text-rose-200';
+                        return (
+                          <div
+                            key={`${item.normalizedWord}-${idx}`}
+                            className={`p-2 rounded-xl border ${rowTone} flex items-start justify-between gap-2`}
+                          >
+                            <div className="min-w-0 space-y-0.5">
+                              <div className="flex items-center gap-1.5 flex-wrap font-mono text-xs">
+                                <span className="font-black text-white">{item.word}</span>
+                                <span className="text-[11px] text-indigo-300 font-bold">{item.kkPhonetic}</span>
+                                <span className="text-[10px] text-slate-400">{item.chineseMeaning}</span>
+                                {item.savedToWeaknessList && (
+                                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-rose-500/25 border border-rose-400/50 text-rose-200 font-bold">
+                                    Weakness-Vocab-List
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-[10px] text-slate-300 leading-snug">{item.kkIssueNote}</p>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <span className="text-xs font-mono font-black tabular-nums">
+                                {item.alignmentScore}%
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  playClickSound();
+                                  speakEnglish(item.word, 0.7, undefined, 1.0, 80, true);
+                                }}
+                                title={`以 0.7x 慢速練習 "${item.word}" ${item.kkPhonetic}`}
+                                className="p-1.5 rounded-lg bg-slate-900/90 hover:bg-slate-800 border border-slate-700 text-cyan-300 cursor-pointer transition-colors"
+                              >
+                                <Volume2 className="w-3 h-3" />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 <div className="flex items-center justify-center gap-2 pt-1 flex-wrap">
                   {audioUrl && (
                     <button
@@ -1504,6 +1736,111 @@ export const SpeechPracticeModal: React.FC<SpeechPracticeModalProps> = ({
                 </div>
               </motion.div>
             )}
+
+            {/* Weakness-Vocab-List Panel (自動收錄 KK 音標發音不準確單字) */}
+            <div
+              id="weakness-vocab-list-panel"
+              className="bg-slate-950/90 border border-rose-500/35 rounded-2xl overflow-hidden"
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  playClickSound();
+                  setShowWeaknessVocabList((prev) => !prev);
+                }}
+                aria-expanded={showWeaknessVocabList}
+                className="w-full px-3.5 py-2.5 flex items-center justify-between gap-2 text-left hover:bg-slate-900/80 transition-colors cursor-pointer"
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <BookMarked className="w-4 h-4 text-rose-400 shrink-0" />
+                  <span className="text-xs font-black text-slate-100 truncate">
+                    Weakness-Vocab-List
+                  </span>
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-rose-950/70 border border-rose-500/40 text-rose-300 tabular-nums shrink-0">
+                    {weaknessVocabList.length} 個弱點單字
+                  </span>
+                </div>
+                <span className="text-[10px] font-mono text-rose-300 font-bold shrink-0">
+                  {showWeaknessVocabList ? '收合 ▲' : '展開特訓 ▼'}
+                </span>
+              </button>
+
+              {showWeaknessVocabList && (
+                <div className="px-3.5 pb-3.5 pt-2 border-t border-slate-800/80 space-y-2.5">
+                  {weaknessVocabList.length === 0 ? (
+                    <div className="text-[11px] text-slate-400 bg-slate-900/70 border border-slate-800 rounded-xl px-3 py-2.5">
+                      目前尚無弱點單字。啟用 <span className="text-indigo-300 font-mono font-bold">AI-Phonetic-Alignment</span> 錄音後，系統會比對麥克風訊號與 KK 音標，自動將發音偏弱（低於 75%）的單字收錄至此。
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex items-center justify-between gap-2 text-[10px] font-mono text-slate-400">
+                        <span>依失準次數與最新紀錄排序（點擊喇叭 0.7x 慢速複習）</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            playClickSound();
+                            clearWeaknessVocabList();
+                            setWeaknessVocabList([]);
+                          }}
+                          className="text-rose-400 hover:text-rose-300 font-bold inline-flex items-center gap-1 cursor-pointer"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          <span>清空</span>
+                        </button>
+                      </div>
+
+                      <div className="space-y-1.5 max-h-52 overflow-y-auto pr-0.5 custom-scrollbar">
+                        {weaknessVocabList.map((entry) => (
+                          <div
+                            key={entry.word}
+                            className="p-2.5 rounded-xl bg-slate-900/90 border border-slate-800 flex items-start justify-between gap-2"
+                          >
+                            <div className="min-w-0 space-y-0.5">
+                              <div className="flex items-center gap-1.5 flex-wrap font-mono text-xs">
+                                <span className="font-black text-rose-200">{entry.displayWord}</span>
+                                <span className="text-[11px] text-indigo-300 font-bold">{entry.kkPhonetic}</span>
+                                <span className="text-[10px] text-slate-400">{entry.chineseMeaning}</span>
+                              </div>
+                              <p className="text-[10px] text-slate-400 leading-snug">{entry.kkIssueNote}</p>
+                              <div className="text-[9px] font-mono text-slate-500 tabular-nums">
+                                最近 KK 對齊 {entry.lastAlignmentScore}% · 失準累計 {entry.missCount} 次
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  playClickSound();
+                                  speakEnglish(entry.displayWord, 0.7, undefined, 1.0, 80, true);
+                                }}
+                                title={`0.7x 慢速重聽 "${entry.displayWord}"`}
+                                className="px-2 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/30 border border-amber-500/40 text-amber-200 text-[10px] font-mono font-bold inline-flex items-center gap-1 cursor-pointer"
+                              >
+                                <Volume2 className="w-3 h-3 text-amber-400" />
+                                <span>0.7x</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  playClickSound();
+                                  const nextList = removeWeaknessVocabWord(entry.word);
+                                  setWeaknessVocabList(nextList);
+                                }}
+                                title="已熟練掌握，移出弱點單字表"
+                                className="px-2 py-1 rounded-lg bg-emerald-950/70 hover:bg-emerald-900/80 border border-emerald-500/40 text-emerald-300 text-[10px] font-bold cursor-pointer"
+                              >
+                                已掌握
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
 
             {/* Pronunciation Trend History & Weak-Phoneme Tracker */}
             {pronunciationInsights.totalSessions > 0 && (
