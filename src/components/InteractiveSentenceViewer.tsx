@@ -1,9 +1,19 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Sparkles, Info, Volume2, Play, Square } from 'lucide-react';
+import { X, Sparkles, Info, Volume2, Play, Square, Copy, Check } from 'lucide-react';
 import { lookupWordDefinition, WordDefinition, getWordKKPhonetic } from '../utils/wordDictionary';
 import { convertPhoneticToZhuyin } from '../utils/zhuyinHelper';
-import { speakSingleEnglishWord, speakEnglish, cancelSpeech } from '../utils/speech';
+import {
+  speakSingleEnglishWord,
+  speakSyllableBreakdown,
+  speakEnglish,
+  speakChinese,
+  cancelSpeech,
+  useSpeechQueue,
+  globalAudioScheduler,
+  cleanEnglishText,
+  SpeechProgressPayload
+} from '../utils/speech';
 import { playClickSound } from '../utils/audioEffects';
 
 interface InteractiveSentenceViewerProps {
@@ -19,6 +29,7 @@ interface InteractiveSentenceViewerProps {
   };
   highlightSvo?: 'subject' | 'action' | 'bridge' | 'object' | null;
   onSelectSvoRole?: (role: 'subject' | 'action' | 'bridge' | 'object' | null) => void;
+  activeReadingWordIndex?: number | null;
   speechSpeed?: number;
   highlightWords?: string[];
   className?: string;
@@ -31,19 +42,57 @@ export const InteractiveSentenceViewer: React.FC<InteractiveSentenceViewerProps>
   components,
   highlightSvo,
   onSelectSvoRole,
+  activeReadingWordIndex = null,
+  speechSpeed = 0.85,
   className = '',
 }) => {
   const [selectedWord, setSelectedWord] = useState<WordDefinition | null>(null);
   const [activeWordIndex, setActiveWordIndex] = useState<number | null>(null);
   const [isStepReading, setIsStepReading] = useState<boolean>(false);
-  const stepTimerRef = useRef<any>(null);
+  const [copiedWordCard, setCopiedWordCard] = useState<boolean>(false);
+  const copyTimerRef = useRef<number | null>(null);
+  const stepSessionRef = useRef<number>(0);
+  const isStartingStepRef = useRef<boolean>(false);
 
-  // Stop step reading if sentence changes or component unmounts
+  const {
+    isPlaying: isQueuePlaying,
+    currentTask,
+    wordIndex: queueWordIndex
+  } = useSpeechQueue();
+
+  // Stop step reading if sentence changes, component unmounts, or speech is interrupted globally
   useEffect(() => {
+    const handleSpeechInterrupted = () => {
+      if (isStartingStepRef.current) return;
+      stepSessionRef.current += 1;
+      setIsStepReading(false);
+      setActiveWordIndex(null);
+    };
+    window.addEventListener('fse-speech-interrupted', handleSpeechInterrupted);
     return () => {
-      if (stepTimerRef.current) clearTimeout(stepTimerRef.current);
+      window.removeEventListener('fse-speech-interrupted', handleSpeechInterrupted);
+      stepSessionRef.current += 1;
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current);
+        copyTimerRef.current = null;
+      }
+      setIsStepReading(false);
+      setActiveWordIndex(null);
     };
   }, [sentence]);
+
+  // Escape dismisses open word detail card
+  useEffect(() => {
+    if (!selectedWord) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        handleCloseWordModal();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedWord]);
 
   // Helper to strip Chinese/emoji annotations from component strings
   const stripComponentAnnotations = (raw?: string) => {
@@ -131,15 +180,46 @@ export const InteractiveSentenceViewer: React.FC<InteractiveSentenceViewerProps>
     });
   }, [sentence, phonetic, components]);
 
-  const stopStepReading = () => {
-    if (stepTimerRef.current) {
-      clearTimeout(stepTimerRef.current);
-      stepTimerRef.current = null;
+  const isSentencePlayingInQueue = Boolean(
+    isQueuePlaying &&
+      currentTask &&
+      (currentTask.rawText === sentence || currentTask.text === cleanEnglishText(sentence))
+  );
+
+  const effectiveActiveWordIndex =
+    activeWordIndex !== null
+      ? activeWordIndex
+      : activeReadingWordIndex !== null && activeReadingWordIndex >= 0 && activeReadingWordIndex < tokens.length
+      ? activeReadingWordIndex
+      : isSentencePlayingInQueue && queueWordIndex >= 0 && queueWordIndex < tokens.length
+      ? queueWordIndex
+      : null;
+
+  // Synchronize SVO role highlight with the currently spoken word during live sentence reading
+  useEffect(() => {
+    if (!onSelectSvoRole) return;
+    if (effectiveActiveWordIndex !== null && tokens[effectiveActiveWordIndex]) {
+      onSelectSvoRole(tokens[effectiveActiveWordIndex].svoRole);
+    } else if (!isQueuePlaying && !isStepReading && !selectedWord) {
+      onSelectSvoRole(null);
     }
+  }, [effectiveActiveWordIndex, isQueuePlaying, isStepReading, selectedWord, tokens]);
+
+  const stopStepReading = () => {
+    stepSessionRef.current += 1;
     setIsStepReading(false);
   };
 
-  // 🐢 零基礎逐字慢速帶讀模式：一個字一個字亮燈、同步右側 SVO 字卡、慢速發音，最後整句連讀
+  const handleSentenceProgress = (payload: SpeechProgressPayload) => {
+    if (payload.wordIndex >= 0 && payload.wordIndex < tokens.length) {
+      setActiveWordIndex(payload.wordIndex);
+      if (onSelectSvoRole) {
+        onSelectSvoRole(tokens[payload.wordIndex].svoRole);
+      }
+    }
+  };
+
+  // 🐢 零基礎逐字慢速帶讀模式：透過 Promise 序列佇列完成一字發音再接下一字，絕不互相截斷，最後整句連讀同步高亮
   const handleToggleStepByStepReading = (e: React.MouseEvent) => {
     e.stopPropagation();
     playClickSound();
@@ -147,6 +227,7 @@ export const InteractiveSentenceViewer: React.FC<InteractiveSentenceViewerProps>
     if (isStepReading) {
       stopStepReading();
       cancelSpeech();
+      setActiveWordIndex(null);
       if (onSelectSvoRole) onSelectSvoRole(null);
       return;
     }
@@ -154,48 +235,105 @@ export const InteractiveSentenceViewer: React.FC<InteractiveSentenceViewerProps>
     const validTokens = tokens.filter((t) => Boolean(t.clean));
     if (validTokens.length === 0) return;
 
-    setIsStepReading(true);
-    let currentStep = 0;
+    isStartingStepRef.current = true;
+    try {
+      cancelSpeech();
+      const mySession = ++stepSessionRef.current;
+      setIsStepReading(true);
 
-    const runStep = () => {
-      if (currentStep >= validTokens.length) {
-        // 最後整句慢速連讀一次
-        setActiveWordIndex(null);
-        if (onSelectSvoRole) onSelectSvoRole(null);
-        speakEnglish(sentence, 0.75, () => {
-          setIsStepReading(false);
-        });
-        return;
-      }
+      const sequenceSteps = [
+        ...validTokens.map((tk) => ({
+          text: tk.clean,
+          lang: 'en-US' as const,
+          rate: 0.72,
+          bufferAfterMs: 240,
+          onStepStart: () => {
+            if (stepSessionRef.current !== mySession) return;
+            setActiveWordIndex(tk.index);
+            if (onSelectSvoRole) onSelectSvoRole(tk.svoRole);
+            if (tk.def) setSelectedWord(tk.def);
+          }
+        })),
+        {
+          text: sentence,
+          lang: 'en-US' as const,
+          rate: 0.78,
+          bufferAfterMs: 160,
+          onStepStart: () => {
+            if (stepSessionRef.current !== mySession) return;
+            setActiveWordIndex(0);
+            if (tokens[0] && onSelectSvoRole) onSelectSvoRole(tokens[0].svoRole);
+          },
+          onStepProgress: (payload: SpeechProgressPayload) => {
+            if (stepSessionRef.current !== mySession) return;
+            handleSentenceProgress(payload);
+          }
+        }
+      ];
 
-      const tk = validTokens[currentStep];
-      setActiveWordIndex(tk.index);
-      if (onSelectSvoRole) onSelectSvoRole(tk.svoRole);
-      if (tk.def) setSelectedWord(tk.def);
-      speakSingleEnglishWord(tk.clean, 0.72);
-
-      currentStep++;
-      stepTimerRef.current = setTimeout(runStep, 1250);
-    };
-
-    runStep();
+      globalAudioScheduler.scheduleSequence(sequenceSteps, {
+        interrupt: false,
+        isCancelled: () => stepSessionRef.current !== mySession,
+        onSequenceEnd: () => {
+          if (stepSessionRef.current === mySession) {
+            setIsStepReading(false);
+            setActiveWordIndex(null);
+            if (!selectedWord && onSelectSvoRole) onSelectSvoRole(null);
+          }
+        }
+      });
+    } finally {
+      isStartingStepRef.current = false;
+    }
   };
 
   const handleWordClick = (
-    token: { clean: string; def: WordDefinition | null; svoRole: 'subject' | 'action' | 'bridge' | 'object'; index: number },
+    token: {
+      clean: string;
+      def: WordDefinition | null;
+      svoRole: 'subject' | 'action' | 'bridge' | 'object';
+      index: number;
+      kk?: string;
+      zhuyin?: string;
+      homophone?: string;
+    },
     e: React.MouseEvent
   ) => {
     e.stopPropagation();
-    if (!token.clean || !token.def) return;
+    if (!token.clean) return;
 
     stopStepReading();
     playClickSound();
-    setSelectedWord(token.def);
-    setActiveWordIndex(token.index);
-    if (onSelectSvoRole) onSelectSvoRole(token.svoRole);
+    isStartingStepRef.current = true;
+    try {
+      if (token.def) {
+        setSelectedWord(token.def);
+      } else {
+        const rolePosMap: Record<'subject' | 'action' | 'bridge' | 'object', string> = {
+          subject: 'n./pron. 主角',
+          action: 'v. 動作',
+          bridge: 'prep./art. 橋樑',
+          object: 'n. 機台/對象'
+        };
+        setSelectedWord({
+          word: token.clean,
+          lemma: token.clean.toLowerCase(),
+          ipa: token.kk || getWordKKPhonetic(token.clean) || '',
+          kkPhonetic: token.kk || getWordKKPhonetic(token.clean) || '',
+          taiwanPhonetic: token.homophone || '',
+          mandarinPhonetic: token.homophone || '',
+          translation: `${rolePosMap[token.svoRole]} · 句中核心詞彙`,
+          partOfSpeech: rolePosMap[token.svoRole]
+        });
+      }
+      setActiveWordIndex(token.index);
+      if (onSelectSvoRole) onSelectSvoRole(token.svoRole);
 
-    // 即時單獨慢速清晰朗讀該單字
-    speakSingleEnglishWord(token.clean, 0.8);
+      // 即時單獨慢速清晰朗讀該單字
+      speakSingleEnglishWord(token.clean, 0.85);
+    } finally {
+      isStartingStepRef.current = false;
+    }
   };
 
   const handleCloseWordModal = (e?: React.MouseEvent) => {
@@ -207,8 +345,10 @@ export const InteractiveSentenceViewer: React.FC<InteractiveSentenceViewerProps>
   };
 
   const gridColsClass =
-    tokens.length <= 3
-      ? 'grid-cols-3'
+    tokens.length <= 2
+      ? 'grid-cols-2'
+      : tokens.length === 3
+      ? 'grid-cols-2 sm:grid-cols-3'
       : tokens.length === 4
       ? 'grid-cols-2 sm:grid-cols-4'
       : 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-5';
@@ -256,21 +396,27 @@ export const InteractiveSentenceViewer: React.FC<InteractiveSentenceViewerProps>
             <span className="px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-[10px] font-mono font-black tracking-wider shrink-0">
               逐字導讀
             </span>
+            {effectiveActiveWordIndex !== null && tokens[effectiveActiveWordIndex] && (
+              <span className="px-1.5 py-0.5 rounded bg-amber-400/20 text-amber-300 border border-amber-400/40 text-[10px] font-mono font-bold truncate max-w-[140px]">
+                朗讀中: {tokens[effectiveActiveWordIndex].clean || tokens[effectiveActiveWordIndex].raw}
+              </span>
+            )}
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0 ml-auto">
             <button
               type="button"
+              aria-pressed={isStepReading}
               onClick={handleToggleStepByStepReading}
-              className={`px-2 py-0.5 rounded-md border text-[10px] font-mono font-black flex items-center gap-1 cursor-pointer transition-all shrink-0 active:scale-95 whitespace-nowrap ${
+              className={`min-h-[30px] px-2.5 py-1 rounded-lg border text-[11px] font-mono font-bold flex items-center gap-1 cursor-pointer transition-colors shrink-0 active:scale-95 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${
                 isStepReading
-                  ? 'bg-amber-400 text-slate-950 border-amber-300 shadow-sm animate-pulse'
+                  ? 'bg-amber-400 text-slate-950 border-amber-300 shadow-sm font-black'
                   : 'bg-amber-500/15 hover:bg-amber-500/25 border-amber-400/40 text-amber-300'
               }`}
               title="逐字慢讀"
             >
               {isStepReading ? <Square className="w-2.5 h-2.5 fill-current" /> : <Play className="w-2.5 h-2.5 fill-current" />}
-              <span>{isStepReading ? '停止' : '慢讀'}</span>
+              <span>{isStepReading ? '停止' : '逐字慢讀'}</span>
             </button>
 
             <button
@@ -279,10 +425,56 @@ export const InteractiveSentenceViewer: React.FC<InteractiveSentenceViewerProps>
                 e.stopPropagation();
                 stopStepReading();
                 playClickSound();
-                speakEnglish(sentence, 0.82);
+                isStartingStepRef.current = true;
+                try {
+                  speakEnglish(
+                    sentence,
+                    0.7,
+                    () => {
+                      setActiveWordIndex(null);
+                      if (!selectedWord && onSelectSvoRole) onSelectSvoRole(null);
+                    },
+                    undefined,
+                    100,
+                    true,
+                    handleSentenceProgress
+                  );
+                } finally {
+                  isStartingStepRef.current = false;
+                }
               }}
-              className="px-2 py-0.5 rounded-md bg-cyan-950/90 hover:bg-cyan-900 border border-cyan-500/40 text-cyan-300 text-[10px] font-mono font-bold flex items-center gap-1 cursor-pointer transition-all shrink-0 active:scale-95 whitespace-nowrap"
-              title="整句朗讀"
+              className="min-h-[30px] px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 border border-amber-500/35 text-amber-300 text-[11px] font-mono font-bold cursor-pointer transition-colors shrink-0 active:scale-95 whitespace-nowrap tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+              title="0.7x 慢速朗讀整句"
+            >
+              0.7x
+            </button>
+
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                stopStepReading();
+                playClickSound();
+                isStartingStepRef.current = true;
+                try {
+                  speakEnglish(
+                    sentence,
+                    speechSpeed,
+                    () => {
+                      setActiveWordIndex(null);
+                      if (!selectedWord && onSelectSvoRole) onSelectSvoRole(null);
+                    },
+                    undefined,
+                    100,
+                    true,
+                    handleSentenceProgress
+                  );
+                } finally {
+                  isStartingStepRef.current = false;
+                }
+              }}
+              className="min-h-[30px] px-2.5 py-1 rounded-lg bg-cyan-950/90 hover:bg-cyan-900 border border-cyan-500/40 text-cyan-300 text-[11px] font-mono font-bold flex items-center gap-1 cursor-pointer transition-colors shrink-0 active:scale-95 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+              title={`整句朗讀 (${speechSpeed}x)`}
             >
               <Volume2 className="w-3 h-3 text-cyan-400" />
               <span>整句</span>
@@ -291,10 +483,10 @@ export const InteractiveSentenceViewer: React.FC<InteractiveSentenceViewerProps>
         </div>
 
         {/* 完整英文句子互動式大字標題列 (支援逐字高亮與點字直讀，不擠壓換行) */}
-        <div className="flex items-center justify-between gap-2 bg-slate-950/90 border border-slate-800/90 rounded-lg px-2.5 py-1.5">
-          <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 text-base sm:text-lg font-mono font-black tracking-tight leading-snug select-text min-w-0 flex-1">
+        <div className="flex items-center justify-between gap-2 bg-slate-950/90 border border-slate-800/80 rounded-xl px-3 py-2">
+          <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-1 text-base sm:text-lg font-mono font-black tracking-tight leading-snug select-text min-w-0 flex-1">
             {tokens.map((tk) => {
-              const isCurWord = activeWordIndex === tk.index;
+              const isCurWord = effectiveActiveWordIndex === tk.index;
               const isRoleMatch = !isCurWord && highlightSvo === tk.svoRole;
               const roleColorText =
                 tk.svoRole === 'subject'
@@ -305,12 +497,17 @@ export const InteractiveSentenceViewer: React.FC<InteractiveSentenceViewerProps>
                   ? 'text-indigo-300'
                   : 'text-emerald-300';
               return (
-                <span
+                <button
                   key={`hero-${tk.id}`}
+                  type="button"
+                  disabled={!tk.clean}
+                  aria-pressed={isCurWord}
                   onClick={(e) => handleWordClick(tk, e)}
-                  className={`cursor-pointer rounded px-1 py-0.2 transition-all ${
+                  className={`rounded-md px-1.5 py-0.5 transition-colors text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${
+                    tk.clean ? 'cursor-pointer' : 'cursor-default'
+                  } ${
                     isCurWord
-                      ? 'bg-amber-400 text-slate-950 scale-105 shadow-sm'
+                      ? 'bg-amber-400 text-slate-950 shadow-sm'
                       : isRoleMatch
                       ? `bg-slate-800 ${roleColorText} underline decoration-2 underline-offset-4`
                       : `text-white hover:${roleColorText} hover:bg-slate-900`
@@ -318,7 +515,7 @@ export const InteractiveSentenceViewer: React.FC<InteractiveSentenceViewerProps>
                   title={tk.def?.translation ? `${tk.clean}: ${tk.def.translation}` : tk.clean}
                 >
                   {tk.raw}
-                </span>
+                </button>
               );
             })}
           </div>
@@ -330,7 +527,7 @@ export const InteractiveSentenceViewer: React.FC<InteractiveSentenceViewerProps>
         {/* 零基礎四層直讀單字卡陣列 (對稱網格排列，4字句自動單排4欄對齊 + SVO 色彩連動) */}
         <div className={`grid ${gridColsClass} gap-1.5 pt-0.5 w-full items-stretch`}>
           {tokens.map((token) => {
-            const isSelected = activeWordIndex === token.index;
+            const isSelected = effectiveActiveWordIndex === token.index;
             const isRoleHighlighted = !isSelected && highlightSvo === token.svoRole;
             const hasCleanWord = Boolean(token.clean);
             const roleTheme = getRoleTheme(token.svoRole);
@@ -347,40 +544,40 @@ export const InteractiveSentenceViewer: React.FC<InteractiveSentenceViewerProps>
                 type="button"
                 onClick={(e) => handleWordClick(token, e)}
                 onMouseEnter={() => {
-                  if (onSelectSvoRole && !isStepReading) onSelectSvoRole(token.svoRole);
+                  if (onSelectSvoRole && !isStepReading && !isQueuePlaying) onSelectSvoRole(token.svoRole);
                 }}
                 onMouseLeave={() => {
-                  if (onSelectSvoRole && !isStepReading && activeWordIndex === null) onSelectSvoRole(null);
+                  if (onSelectSvoRole && !isStepReading && !isQueuePlaying && activeWordIndex === null) onSelectSvoRole(null);
                 }}
                 disabled={!hasCleanWord}
-                className={`group relative px-2 py-1.5 rounded-xl text-xs font-mono transition-all duration-200 ease-out gpu-smooth cursor-pointer hover:-translate-y-0.5 active:scale-95 text-left w-full flex flex-col items-start justify-between gap-0.5 border ${
+                className={`group relative px-2.5 py-2 rounded-xl text-xs font-mono transition-colors duration-150 cursor-pointer active:scale-[0.98] text-left w-full flex flex-col items-start justify-between gap-1 border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${
                   isSelected
-                    ? 'bg-amber-400 text-slate-950 border-amber-300 shadow-lg shadow-amber-500/35 -translate-y-0.5 scale-[1.02] ring-2 ring-amber-300'
+                    ? 'bg-amber-400 text-slate-950 border-amber-300 shadow-lg shadow-amber-500/30 ring-2 ring-amber-300/80'
                     : isRoleHighlighted
-                    ? `text-white shadow-md -translate-y-0.5 scale-[1.015] ${roleTheme.activeRing}`
+                    ? `text-white shadow-md ${roleTheme.activeRing}`
                     : `bg-slate-950/95 text-cyan-100 hover:text-white shadow-xs ${roleTheme.borderClass}`
                 } ${!hasCleanWord ? 'opacity-70 cursor-default' : ''}`}
               >
                 {/* 頂部語序對應標籤 + 喇叭 */}
                 <div className="w-full flex items-center justify-between gap-1">
                   <span
-                    className={`px-1 py-0.1 rounded text-[9px] font-sans font-black border whitespace-nowrap ${
+                    className={`px-1.5 py-0.5 rounded text-[9px] font-sans font-black border whitespace-nowrap leading-none ${
                       isSelected ? 'bg-slate-950/20 text-slate-950 border-slate-950/30' : roleTheme.badgeClass
                     }`}
                   >
                     {roleTheme.badge}
                   </span>
-                  <Volume2 className={`w-2.5 h-2.5 shrink-0 ${isSelected ? 'text-slate-950' : 'text-cyan-400/80 group-hover:text-cyan-300'}`} />
+                  <Volume2 className={`w-3 h-3 shrink-0 ${isSelected ? 'text-slate-950' : 'text-cyan-400/80 group-hover:text-cyan-300'}`} />
                 </div>
 
                 {/* 第一層：英文單字 */}
-                <div className="w-full border-b border-current/15 pb-0.5 pt-0.5 flex items-baseline justify-between gap-1 flex-wrap">
-                  <span className="font-mono font-black text-xs sm:text-[13px] tracking-tight leading-snug break-all">
+                <div className="w-full border-b border-current/15 pb-0.5 pt-0.5 flex items-baseline justify-between gap-1 flex-wrap min-w-0">
+                  <span className="font-mono font-black text-xs sm:text-[13px] tracking-tight leading-snug break-words min-w-0">
                     {token.clean || token.raw.replace(/[.,!?;:]+$/g, '')}
                   </span>
                   {token.kk && (
                     <span
-                      className={`text-[10px] font-mono font-bold whitespace-nowrap ${
+                      className={`text-[10px] font-mono font-bold break-words leading-tight ${
                         isSelected ? 'text-slate-900' : 'text-cyan-300/90'
                       }`}
                     >
@@ -392,7 +589,7 @@ export const InteractiveSentenceViewer: React.FC<InteractiveSentenceViewerProps>
                 {/* 第二層：繁體中文詞義 */}
                 {meaningShort && (
                   <span
-                    className={`block text-[11px] font-sans font-black break-words whitespace-normal leading-tight pt-0.5 ${
+                    className={`block w-full text-[11px] font-sans font-black break-words whitespace-normal leading-tight pt-0.5 ${
                       isSelected ? 'text-slate-950' : 'text-amber-300 group-hover:text-amber-200'
                     }`}
                   >
@@ -403,12 +600,12 @@ export const InteractiveSentenceViewer: React.FC<InteractiveSentenceViewerProps>
                 {/* 第三層：注音直讀 (以音節為單位保護不拆字、聲調不落單) */}
                 {token.zhuyin && (
                   <div
-                    className={`flex flex-wrap items-center gap-x-1 gap-y-0.5 text-[10px] font-mono font-bold leading-tight ${
+                    className={`w-full flex flex-wrap items-center gap-x-1 gap-y-0.5 text-[10px] font-mono font-bold leading-tight ${
                       isSelected ? 'text-slate-900 font-black' : 'text-yellow-200/95'
                     }`}
                   >
                     {token.zhuyin.split(/\s+/).filter(Boolean).map((syl, sIdx) => (
-                      <span key={sIdx} className="inline-block whitespace-nowrap">
+                      <span key={sIdx} className="inline-block break-words">
                         {syl}
                       </span>
                     ))}
@@ -418,7 +615,7 @@ export const InteractiveSentenceViewer: React.FC<InteractiveSentenceViewerProps>
                 {/* 第四層：台味諧音直讀 */}
                 {token.homophone && (
                   <span
-                    className={`block text-[10px] font-sans font-bold whitespace-nowrap leading-tight ${
+                    className={`block w-full text-[10px] font-sans font-bold break-words whitespace-normal leading-tight ${
                       isSelected ? 'text-slate-950 font-black' : 'text-emerald-300/95'
                     }`}
                   >
@@ -439,53 +636,103 @@ export const InteractiveSentenceViewer: React.FC<InteractiveSentenceViewerProps>
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -4, scale: 0.98 }}
             transition={{ duration: 0.15 }}
-            className="w-full mt-1.5 p-3 bg-gradient-to-br from-slate-900 via-indigo-950/90 to-slate-950 rounded-2xl border-2 border-amber-400/80 shadow-xl shadow-amber-950/30 text-left relative overflow-hidden"
+            className="w-full mt-2 p-3.5 bg-gradient-to-br from-slate-900 via-indigo-950/85 to-slate-950 rounded-2xl border border-amber-400/60 shadow-xl shadow-black/40 text-left relative overflow-hidden"
           >
             {/* Top Row: Word, POS, Audio, Close */}
-            <div className="flex items-center justify-between border-b border-slate-800/80 pb-2 mb-2 flex-wrap gap-1.5">
+            <div className="flex items-center justify-between border-b border-slate-800/80 pb-2.5 mb-2.5 flex-wrap gap-2">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-lg sm:text-xl font-mono font-black text-amber-300">
                   {selectedWord.word}
                 </span>
-                <span className="text-xs px-1.5 py-0.2 rounded-md bg-amber-400/20 text-amber-300 border border-amber-400/30 font-mono font-bold">
+                <span className="text-xs px-2 py-0.5 rounded-md bg-amber-400/20 text-amber-300 border border-amber-400/30 font-mono font-bold leading-none">
                   {selectedWord.partOfSpeech}
                 </span>
                 {selectedWord.category && (
-                  <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-600/40 font-mono uppercase">
+                  <span className="text-[10px] px-2 py-0.5 rounded-md bg-cyan-950 text-cyan-300 border border-cyan-600/40 font-mono uppercase leading-none">
                     {selectedWord.category}
                   </span>
                 )}
               </div>
 
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1.5 flex-wrap">
                 <button
                   type="button"
                   onClick={() => {
                     playClickSound();
-                    speakSingleEnglishWord(selectedWord.word, 0.62);
+                    isStartingStepRef.current = true;
+                    try {
+                      speakSingleEnglishWord(selectedWord.word, 0.7);
+                    } finally {
+                      isStartingStepRef.current = false;
+                    }
                   }}
-                  className="px-2 py-0.8 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/50 text-amber-300 font-bold text-xs flex items-center gap-1 cursor-pointer transition-all active:scale-95 shadow-xs"
-                  title="慢讀"
+                  className="min-h-[32px] px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/50 text-amber-300 font-mono font-bold text-xs flex items-center gap-1 cursor-pointer transition-colors active:scale-95 whitespace-nowrap tabular-nums"
+                  title="0.7x 慢讀單字"
                 >
-                  <span>慢讀</span>
+                  <span>0.7x</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => {
                     playClickSound();
-                    speakSingleEnglishWord(selectedWord.word, 0.85);
+                    isStartingStepRef.current = true;
+                    try {
+                      speakSyllableBreakdown(selectedWord.syllables || selectedWord.word);
+                    } finally {
+                      isStartingStepRef.current = false;
+                    }
                   }}
-                  className="px-2 py-0.8 rounded-lg bg-cyan-950/90 hover:bg-cyan-900 border border-cyan-500/50 text-cyan-300 font-bold text-xs flex items-center gap-1 cursor-pointer transition-all active:scale-95 shadow-xs"
-                  title="發音"
+                  className="min-h-[32px] px-2.5 py-1 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-400/50 text-indigo-200 font-mono font-bold text-xs flex items-center gap-1 cursor-pointer transition-colors active:scale-95 whitespace-nowrap"
+                  title="音節慢速拆解發音"
+                >
+                  <span>音節</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    playClickSound();
+                    isStartingStepRef.current = true;
+                    try {
+                      speakSingleEnglishWord(selectedWord.word, speechSpeed);
+                    } finally {
+                      isStartingStepRef.current = false;
+                    }
+                  }}
+                  className="min-h-[32px] px-2.5 py-1 rounded-lg bg-cyan-950/90 hover:bg-cyan-900 border border-cyan-500/50 text-cyan-300 font-bold text-xs flex items-center gap-1 cursor-pointer transition-colors active:scale-95 whitespace-nowrap"
+                  title={`發音 (${speechSpeed}x)`}
                 >
                   <Volume2 className="w-3.5 h-3.5 text-cyan-300" />
                   <span>發音</span>
                 </button>
                 <button
                   type="button"
+                  onClick={() => {
+                    playClickSound();
+                    const kk = selectedWord.kkPhonetic || getWordKKPhonetic(selectedWord.word, selectedWord.ipa);
+                    const zh = selectedWord.taiwanPhonetic ? convertPhoneticToZhuyin(selectedWord.taiwanPhonetic) : '';
+                    const summary = `${selectedWord.word} (${selectedWord.partOfSpeech}) ${selectedWord.translation}${kk ? ` · KK ${kk}` : ''}${zh ? ` · 注音 ${zh}` : ''}`;
+                    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+                      navigator.clipboard.writeText(summary).catch(() => {});
+                    }
+                    setCopiedWordCard(true);
+                    if (copyTimerRef.current !== null) {
+                      window.clearTimeout(copyTimerRef.current);
+                    }
+                    copyTimerRef.current = window.setTimeout(() => {
+                      copyTimerRef.current = null;
+                      setCopiedWordCard(false);
+                    }, 1800);
+                  }}
+                  className="min-h-[32px] px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white font-bold text-xs flex items-center gap-1 cursor-pointer transition-colors whitespace-nowrap"
+                  title="複製單字與音標筆記"
+                >
+                  {copiedWordCard ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                </button>
+                <button
+                  type="button"
                   onClick={handleCloseWordModal}
-                  className="p-1 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-all cursor-pointer"
-                  title="關閉單字釋義"
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer"
+                  title="關閉單字釋義 (Esc)"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -494,9 +741,28 @@ export const InteractiveSentenceViewer: React.FC<InteractiveSentenceViewerProps>
 
             {/* Translation & Phonetic Bar */}
             <div className="space-y-1.5">
-              <div className="text-sm sm:text-base font-black text-slate-100 flex items-center gap-1.5">
-                <span className="text-amber-400">📖</span>
-                <span>{selectedWord.translation}</span>
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="text-sm sm:text-base font-black text-slate-100 flex items-center gap-1.5">
+                  <span className="text-amber-400">📖</span>
+                  <span>{selectedWord.translation}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    playClickSound();
+                    isStartingStepRef.current = true;
+                    try {
+                      speakChinese(selectedWord.translation, 0.95);
+                    } finally {
+                      isStartingStepRef.current = false;
+                    }
+                  }}
+                  className="px-2 py-0.5 rounded-md bg-slate-800/90 hover:bg-slate-700 border border-slate-700 text-amber-300 text-[10px] font-mono font-bold flex items-center gap-1 cursor-pointer transition-colors"
+                  title="朗讀中文詞義"
+                >
+                  <Volume2 className="w-3 h-3" />
+                  <span>聽中文</span>
+                </button>
               </div>
 
               {/* Enhanced Phonetic Badges: KK, Syllables, Zhuyin, Homophone */}

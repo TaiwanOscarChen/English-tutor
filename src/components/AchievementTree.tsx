@@ -48,17 +48,64 @@ interface AchievementTreeProps {
   speechSpeed: number;
 }
 
+function buildHydratedDomains(masteredTopics: string[] = []): AchievementDomain[] {
+  const masteredSet = new Set(masteredTopics);
+  return FAB_ACHIEVEMENT_DOMAINS.map((domain) => ({
+    ...domain,
+    nodes: domain.nodes.map((node) => {
+      if (masteredSet.has(node.title)) {
+        return { ...node, status: 'mastered' as const, masteryPercentage: 100 };
+      }
+      return node;
+    }),
+  }));
+}
+
+function buildHydratedBadges(hydratedDomains: AchievementDomain[]): MilestoneBadge[] {
+  const masteredDomains = hydratedDomains.filter((d) =>
+    d.nodes.every((n) => n.status === 'mastered')
+  );
+  return MILESTONE_BADGES.map((badge) => {
+    const matched = masteredDomains.some(
+      (d) => badge.category.includes(d.title.slice(0, 4)) || badge.title.includes(d.title.slice(0, 2))
+    );
+    return matched ? { ...badge, isUnlocked: true } : badge;
+  });
+}
+
 export const AchievementTree: React.FC<AchievementTreeProps> = ({
   diagnostics,
   onUpdateDiagnostics,
   speechSpeed
 }) => {
-  const [domains, setDomains] = useState<AchievementDomain[]>(FAB_ACHIEVEMENT_DOMAINS);
-  const [badges, setBadges] = useState<MilestoneBadge[]>(MILESTONE_BADGES);
+  const [domains, setDomains] = useState<AchievementDomain[]>(() =>
+    buildHydratedDomains(diagnostics.masteredTopics)
+  );
+  const [badges, setBadges] = useState<MilestoneBadge[]>(() =>
+    buildHydratedBadges(buildHydratedDomains(diagnostics.masteredTopics))
+  );
   const [selectedNode, setSelectedNode] = useState<AchievementNode | null>(null);
   const [celebratingBadge, setCelebratingBadge] = useState<MilestoneBadge | null>(null);
   const [isBadgeModalOpen, setIsBadgeModalOpen] = useState<boolean>(false);
   const [chartTimeframe, setChartTimeframe] = useState<'7days' | '14days'>('7days');
+
+  React.useEffect(() => {
+    const nextDomains = buildHydratedDomains(diagnostics.masteredTopics);
+    setDomains(nextDomains);
+    setBadges(buildHydratedBadges(nextDomains));
+  }, [diagnostics.masteredTopics]);
+
+  React.useEffect(() => {
+    if (!selectedNode) return;
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setSelectedNode(null);
+      }
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [selectedNode]);
 
   // Calculate stats
   const allNodes = domains.flatMap((d) => d.nodes);
@@ -190,9 +237,9 @@ export const AchievementTree: React.FC<AchievementTreeProps> = ({
             <span>日期：{label}</span>
           </p>
           {payload.map((entry: any, index: number) => (
-            <div key={`item-${index}`} className="flex items-center justify-between gap-4">
+            <div key={`item-${index}`} className="flex items-center justify-between gap-4 tabular-nums">
               <span className="flex items-center gap-1.5" style={{ color: entry.color }}>
-                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} />
+                <span className="w-2.5 h-1 rounded-xs shrink-0" style={{ backgroundColor: entry.color }} />
                 <span>{entry.name}:</span>
               </span>
               <strong className="text-slate-100">{entry.value}</strong>
@@ -213,8 +260,8 @@ export const AchievementTree: React.FC<AchievementTreeProps> = ({
 
         <div className="flex items-center justify-between gap-6 flex-wrap relative z-10">
           <div className="space-y-2 max-w-2xl">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-500/20 border border-cyan-400/40 text-cyan-300 text-xs font-mono font-black">
-              <Cpu className="w-3.5 h-3.5 text-cyan-400" />
+            <div className="inline-flex items-center gap-2 text-cyan-400 text-xs font-mono font-black">
+              <Cpu className="w-3.5 h-3.5 shrink-0" />
               <span>晶圓維修成就樹與技能地圖 (Fab Skill Tree)</span>
             </div>
             <h2 className="text-2xl sm:text-3xl font-black text-slate-100 tracking-tight font-mono">
@@ -230,9 +277,9 @@ export const AchievementTree: React.FC<AchievementTreeProps> = ({
             <span className="text-[11px] font-mono font-extrabold text-slate-400 block uppercase tracking-wider">
               整體 Topic 精通總進度
             </span>
-            <div className="text-3xl font-black font-mono text-amber-400 flex items-center justify-center gap-1">
+            <div className="text-3xl font-black font-mono text-amber-400 flex items-center justify-center gap-1.5 tabular-nums">
               <span>{overallMasteryPct}%</span>
-              <Trophy className="w-6 h-6 text-yellow-400 fill-yellow-400/20 animate-pulse" />
+              <Trophy className="w-6 h-6 text-yellow-400 fill-yellow-400/20 shrink-0" />
             </div>
             <div className="w-full bg-slate-900 rounded-full h-2.5 overflow-hidden border border-slate-800 p-0.5">
               <motion.div
@@ -290,7 +337,7 @@ export const AchievementTree: React.FC<AchievementTreeProps> = ({
         </div>
 
         {/* Quick KPI Stat Highlights */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 tabular-nums">
           <div className="bg-slate-950 border border-slate-800 rounded-2xl p-3.5 space-y-1 shadow-inner">
             <span className="text-[10px] text-slate-400 font-mono block">累積掌握總字數</span>
             <div className="text-xl sm:text-2xl font-black font-mono text-cyan-300">
@@ -339,7 +386,7 @@ export const AchievementTree: React.FC<AchievementTreeProps> = ({
           <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 space-y-3 shadow-inner">
             <div className="flex items-center justify-between">
               <h4 className="text-xs font-black text-slate-200 font-mono flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-cyan-400" />
+                <TrendingUp className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
                 <span>總學習字數累積成長曲線</span>
               </h4>
               <span className="text-[10px] text-slate-500 font-mono">單位: 單字量</span>
@@ -391,7 +438,7 @@ export const AchievementTree: React.FC<AchievementTreeProps> = ({
           <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 space-y-3 shadow-inner">
             <div className="flex items-center justify-between">
               <h4 className="text-xs font-black text-slate-200 font-mono flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-indigo-400" />
+                <BarChart3 className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
                 <span>每日維修句型練習頻率與語音測試</span>
               </h4>
               <span className="text-[10px] text-slate-500 font-mono">單位: 次數</span>
@@ -453,7 +500,7 @@ export const AchievementTree: React.FC<AchievementTreeProps> = ({
                   {/* Domain Header */}
                   <div className="flex items-start justify-between gap-2 border-b border-slate-800/80 pb-3">
                     <div className="flex items-center gap-2.5">
-                      <div className="p-2.5 rounded-2xl bg-slate-800 border border-slate-700 text-cyan-400 group-hover:scale-105 transition-transform">
+                      <div className="p-2.5 rounded-2xl bg-slate-800 border border-slate-700 text-cyan-400 transition-colors">
                         <DomainIcon className="w-5 h-5" />
                       </div>
                       <div>
@@ -466,14 +513,14 @@ export const AchievementTree: React.FC<AchievementTreeProps> = ({
                       </div>
                     </div>
 
-                    <span className="px-2 py-1 rounded-lg bg-amber-400/20 text-amber-300 border border-amber-400/40 text-[10px] font-mono font-black shrink-0">
+                    <span className="px-2 py-1 rounded-lg bg-amber-400/20 text-amber-300 border border-amber-400/40 text-[10px] font-mono font-black shrink-0 tabular-nums">
                       {domainPct}% 完成
                     </span>
                   </div>
 
                   {/* DOMAIN DYNAMIC PROGRESS BAR */}
                   <div className="space-y-1.5 bg-slate-950/60 p-2.5 rounded-2xl border border-slate-850">
-                    <div className="flex items-center justify-between text-[10px] font-mono">
+                    <div className="flex items-center justify-between text-[10px] font-mono tabular-nums">
                       <span className="text-slate-400 font-bold">Topic 掌握進度條：</span>
                       <span className="text-cyan-300 font-bold">{domainMasteredCount} / {domain.nodes.length} 關</span>
                     </div>
@@ -504,8 +551,16 @@ export const AchievementTree: React.FC<AchievementTreeProps> = ({
                       return (
                         <div
                           key={node.id}
+                          role="button"
+                          tabIndex={0}
                           onClick={() => setSelectedNode(node)}
-                          className={`p-3 rounded-2xl border transition-all cursor-pointer space-y-2 ${
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              setSelectedNode(node);
+                            }
+                          }}
+                          className={`p-3 rounded-2xl border transition-all cursor-pointer space-y-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
                             isMastered
                               ? 'bg-slate-950 border-emerald-500/60 shadow-sm shadow-emerald-500/10'
                               : 'bg-slate-950/50 border-slate-800/80 hover:border-slate-700'
@@ -596,9 +651,9 @@ export const AchievementTree: React.FC<AchievementTreeProps> = ({
                   setIsBadgeModalOpen(true);
                 }
               }}
-              className={`p-4 rounded-2xl border transition-all cursor-pointer space-y-2 flex flex-col justify-between relative overflow-hidden ${
+              className={`p-4 rounded-2xl border transition-colors cursor-pointer space-y-2 flex flex-col justify-between relative overflow-hidden ${
                 badge.isUnlocked
-                  ? 'bg-slate-950 border-amber-400/80 shadow-lg hover:scale-105'
+                  ? 'bg-slate-950 border-amber-400/80 hover:border-amber-300 shadow-lg'
                   : 'bg-slate-950/40 border-slate-800 opacity-60 grayscale'
               }`}
             >
@@ -634,8 +689,15 @@ export const AchievementTree: React.FC<AchievementTreeProps> = ({
       {/* Node Detail Inspector Modal */}
       <AnimatePresence>
         {selectedNode && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={selectedNode.title}
+            onClick={() => setSelectedNode(null)}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md"
+          >
             <motion.div
+              onClick={(e) => e.stopPropagation()}
               initial={{ scale: 0.9, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.9, opacity: 0, y: 20 }}
@@ -667,15 +729,26 @@ export const AchievementTree: React.FC<AchievementTreeProps> = ({
                 </div>
 
                 <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4 space-y-2">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-2">
                     <span className="text-[11px] font-bold text-cyan-400 font-mono">拆解 SVO 核心結構：</span>
-                    <button
-                      onClick={() => speakEnglish(selectedNode.svoPattern, speechSpeed)}
-                      className="text-xs font-bold text-cyan-300 hover:text-white flex items-center gap-1 cursor-pointer"
-                    >
-                      <Volume2 className="w-3.5 h-3.5" />
-                      朗讀範例
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => speakEnglish(selectedNode.svoPattern, 0.7)}
+                        className="px-2 py-0.5 rounded bg-slate-900 hover:bg-slate-800 border border-slate-700 text-[10px] font-mono font-bold text-amber-300 cursor-pointer tabular-nums"
+                        title="0.7x 慢速朗讀"
+                      >
+                        0.7x 慢讀
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => speakEnglish(selectedNode.svoPattern, speechSpeed)}
+                        className="text-xs font-bold text-cyan-300 hover:text-white flex items-center gap-1 cursor-pointer"
+                      >
+                        <Volume2 className="w-3.5 h-3.5" />
+                        朗讀範例
+                      </button>
+                    </div>
                   </div>
                   <div className="text-sm font-mono font-black text-slate-100 bg-slate-900 p-2.5 rounded-xl text-center border border-slate-800">
                     {selectedNode.svoPattern}
@@ -689,7 +762,7 @@ export const AchievementTree: React.FC<AchievementTreeProps> = ({
                     handleToggleNodeMastery(selectedNode.id);
                     setSelectedNode(null);
                   }}
-                  className={`w-full py-3 rounded-2xl font-black text-xs cursor-pointer shadow-lg transition-all hover:scale-[1.02] active:scale-95 ${
+                  className={`w-full py-3 rounded-2xl font-black text-xs cursor-pointer shadow-lg transition-colors active:scale-95 ${
                     selectedNode.status === 'mastered'
                       ? 'bg-slate-800 text-slate-300 border border-slate-700'
                       : 'bg-emerald-400 text-slate-950 hover:bg-emerald-300'

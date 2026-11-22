@@ -30,6 +30,37 @@ export const AiErrorCodeGeneratorModal: React.FC<AiErrorCodeGeneratorModalProps>
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [resultData, setResultData] = useState<any | null>(null);
   const [copied, setCopied] = useState<boolean>(false);
+  const copyTimerRef = React.useRef<number | null>(null);
+  const abortRef = React.useRef<AbortController | null>(null);
+  const timeoutRef = React.useRef<number | null>(null);
+
+  React.useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+      if (timeoutRef.current !== null) {
+        window.clearTimeout(timeoutRef.current);
+      }
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+    };
+  }, []);
+
+  React.useEffect(() => {
+    if (!isOpen) {
+      abortRef.current?.abort();
+      if (timeoutRef.current !== null) {
+        window.clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+      return;
+    }
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -60,9 +91,15 @@ export const AiErrorCodeGeneratorModal: React.FC<AiErrorCodeGeneratorModalProps>
       ]
     };
 
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    if (timeoutRef.current !== null) {
+      window.clearTimeout(timeoutRef.current);
+    }
+    timeoutRef.current = window.setTimeout(() => controller.abort(), 8000);
+
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000);
       const response = await fetch('/api/error-code-handover', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -73,7 +110,11 @@ export const AiErrorCodeGeneratorModal: React.FC<AiErrorCodeGeneratorModalProps>
         }),
         signal: controller.signal
       });
-      clearTimeout(timeoutId);
+      if (timeoutRef.current !== null) {
+        window.clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+      if (controller.signal.aborted) return;
       if (response.ok) {
         const data = await response.json();
         const sanitizedResult = {
@@ -94,26 +135,48 @@ export const AiErrorCodeGeneratorModal: React.FC<AiErrorCodeGeneratorModalProps>
         setResultData(fallbackResult);
         playSuccessChime();
       }
-    } catch (e) {
+    } catch {
+      if (controller.signal.aborted) return;
       setResultData(fallbackResult);
       playSuccessChime();
     } finally {
-      setIsLoading(false);
+      if (timeoutRef.current !== null) {
+        window.clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+      if (!controller.signal.aborted) {
+        setIsLoading(false);
+      }
     }
   };
 
   const handleCopy = (text: string) => {
     playClickSound();
     try {
-      navigator.clipboard.writeText(text);
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        navigator.clipboard.writeText(text).catch(() => {});
+      }
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+      copyTimerRef.current = window.setTimeout(() => {
+        copyTimerRef.current = null;
+        setCopied(false);
+      }, 2000);
     } catch {}
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="AI 通用機台警報暨交接金句產生器"
+      onClick={onClose}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md"
+    >
       <motion.div
+        onClick={(e) => e.stopPropagation()}
         initial={{ opacity: 0, scale: 0.95, y: 10 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95, y: 10 }}
@@ -136,11 +199,14 @@ export const AiErrorCodeGeneratorModal: React.FC<AiErrorCodeGeneratorModalProps>
           </div>
 
           <button
+            type="button"
+            aria-label="關閉產生器"
             onClick={() => {
               playClickSound();
               onClose();
             }}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-800 transition-colors"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-800 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+            title="關閉視窗 (Esc)"
           >
             <X className="w-5 h-5" />
           </button>
@@ -157,11 +223,13 @@ export const AiErrorCodeGeneratorModal: React.FC<AiErrorCodeGeneratorModalProps>
               {COMMON_ERROR_CODES.map((item) => (
                 <button
                   key={item.code}
+                  type="button"
+                  aria-pressed={selectedCode === item.code}
                   onClick={() => {
                     playClickSound();
                     setSelectedCode(item.code);
                   }}
-                  className={`p-2 rounded-xl text-left border text-xs transition-all ${
+                  className={`p-2 rounded-xl text-left border text-xs transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${
                     selectedCode === item.code
                       ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-md'
                       : 'bg-slate-950/60 hover:bg-slate-800 text-slate-300 border-slate-800'
@@ -221,11 +289,12 @@ export const AiErrorCodeGeneratorModal: React.FC<AiErrorCodeGeneratorModalProps>
 
           {/* Generate Button */}
           <button
+            type="button"
             onClick={handleGenerate}
             disabled={isLoading}
-            className="w-full py-2.5 rounded-xl text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-300 hover:from-amber-300 hover:to-yellow-200 shadow-lg shadow-amber-500/20 active:scale-[0.99] transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+            className="w-full py-2.5 rounded-xl text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-300 hover:from-amber-300 hover:to-yellow-200 shadow-lg shadow-amber-500/20 active:scale-[0.99] transition-all flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
           >
-            <Sparkles className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+            <Sparkles className={`w-4 h-4 ${isLoading ? 'motion-safe:animate-spin' : ''}`} />
             <span>{isLoading ? 'AI 正在分析機台警報並生成公開通用交接報告...' : 'AI 生成標準交接報告與對話金句'}</span>
           </button>
 
@@ -251,15 +320,25 @@ export const AiErrorCodeGeneratorModal: React.FC<AiErrorCodeGeneratorModalProps>
                     </span>
                     <div className="flex items-center gap-2">
                       <button
+                        type="button"
                         onClick={() => speakEnglish(resultData.handoverReport)}
-                        className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300"
-                        title="朗讀"
+                        className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer"
+                        title="原速朗讀"
                       >
                         <Volume2 className="w-3.5 h-3.5 text-cyan-400" />
                       </button>
                       <button
+                        type="button"
+                        onClick={() => speakEnglish(resultData.handoverReport, 0.7)}
+                        className="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-amber-300 font-mono text-[10px] font-bold cursor-pointer tabular-nums"
+                        title="0.7x 慢速朗讀"
+                      >
+                        0.7x
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => handleCopy(resultData.handoverReport)}
-                        className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center gap-1 text-[10px]"
+                        className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center gap-1 text-[10px] cursor-pointer"
                       >
                         {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                         <span>{copied ? '已複製' : '複製'}</span>
@@ -271,7 +350,7 @@ export const AiErrorCodeGeneratorModal: React.FC<AiErrorCodeGeneratorModalProps>
                     "{resultData.handoverReport}"
                   </p>
                   <div className="mt-1.5 flex items-start gap-2 text-[11px] font-mono text-cyan-300">
-                    <span className="px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-[9px] font-bold shrink-0">
+                    <span className="px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-[9px] font-bold shrink-0">
                       KK音標
                     </span>
                     <span className="break-words">{getSentenceKKPhonetic(resultData.handoverReport)}</span>
@@ -291,14 +370,26 @@ export const AiErrorCodeGeneratorModal: React.FC<AiErrorCodeGeneratorModalProps>
                     <div className="space-y-2">
                       {resultData.svoSentences.map((svo: any, idx: number) => (
                         <div key={idx} className="p-2.5 rounded-lg bg-slate-900/80 border border-slate-800 text-xs space-y-1">
-                          <div className="flex items-center justify-between">
+                          <div className="flex items-center justify-between gap-2">
                             <span className="font-bold text-slate-100 font-mono">{svo.english}</span>
-                            <button
-                              onClick={() => speakEnglish(svo.english)}
-                              className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-cyan-400"
-                            >
-                              <Volume2 className="w-3.5 h-3.5" />
-                            </button>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => speakEnglish(svo.english)}
+                                className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-cyan-400 cursor-pointer"
+                                title="原速朗讀"
+                              >
+                                <Volume2 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => speakEnglish(svo.english, 0.7)}
+                                className="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-amber-300 font-mono text-[10px] font-bold cursor-pointer tabular-nums"
+                                title="0.7x 慢速朗讀"
+                              >
+                                0.7x
+                              </button>
+                            </div>
                           </div>
                           <div className="text-[11px] text-slate-300 font-semibold">{svo.chinese}</div>
                           <div className="flex flex-wrap items-center gap-1.5 pt-0.5 text-[10px] font-mono">

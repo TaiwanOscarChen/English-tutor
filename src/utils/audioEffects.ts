@@ -5,6 +5,7 @@ export type AmbientSoundType = 'fan' | 'alarm' | 'silent';
 let audioCtx: AudioContext | null = null;
 let masterGainNode: GainNode | null = null;
 let masterCompressorNode: DynamicsCompressorNode | null = null;
+let pendingResumePromise: Promise<AudioContext | null> | null = null;
 
 // Ambient Loop Management
 let ambientNoiseSource: AudioBufferSourceNode | null = null;
@@ -13,93 +14,199 @@ let ambientAlarmTimer: any = null;
 let ambientMasterGain: GainNode | null = null;
 let currentPlayingAmbientType: AmbientSoundType = 'silent';
 
+function isContextRecoverableState(state: string): boolean {
+  return state === 'suspended' || state === 'interrupted';
+}
+
 export function getAudioContext(): AudioContext | null {
   if (typeof window === 'undefined') return null;
   if (!audioCtx || audioCtx.state === 'closed') {
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
     if (AudioContextClass) {
+      masterCompressorNode = null;
+      masterGainNode = null;
       audioCtx = new AudioContextClass();
+      const createdCtx = audioCtx;
       try {
+        // 監聽 iOS/Safari 電話打斷或藍牙切換導致的 interrupted / suspended 狀態並於可恢復時自動喚醒
+        createdCtx.onstatechange = () => {
+          if (audioCtx !== createdCtx) return;
+          if (createdCtx.state === 'closed') {
+            audioCtx = null;
+            masterCompressorNode = null;
+            masterGainNode = null;
+          }
+        };
+
         // 建立音訊動態壓縮器 (Dynamics Compressor) 與主增益放大總線 (Master Gain Bus)
         // 確保在極致大聲模式下各音效清脆飽滿、穿透力強且完全無破音失真 (Clarity & Anti-Clipping)
-        masterCompressorNode = audioCtx.createDynamicsCompressor();
-        masterCompressorNode.threshold.setValueAtTime(-14, audioCtx.currentTime);
-        masterCompressorNode.knee.setValueAtTime(20, audioCtx.currentTime);
-        masterCompressorNode.ratio.setValueAtTime(8, audioCtx.currentTime);
-        masterCompressorNode.attack.setValueAtTime(0.003, audioCtx.currentTime);
-        masterCompressorNode.release.setValueAtTime(0.2, audioCtx.currentTime);
+        masterCompressorNode = createdCtx.createDynamicsCompressor();
+        masterCompressorNode.threshold.setValueAtTime(-14, createdCtx.currentTime);
+        masterCompressorNode.knee.setValueAtTime(20, createdCtx.currentTime);
+        masterCompressorNode.ratio.setValueAtTime(8, createdCtx.currentTime);
+        masterCompressorNode.attack.setValueAtTime(0.003, createdCtx.currentTime);
+        masterCompressorNode.release.setValueAtTime(0.2, createdCtx.currentTime);
 
-        masterGainNode = audioCtx.createGain();
-        masterGainNode.gain.setValueAtTime(1.45, audioCtx.currentTime); // 145% 響度深度放大
+        masterGainNode = createdCtx.createGain();
+        masterGainNode.gain.setValueAtTime(1.45, createdCtx.currentTime); // 145% 響度深度放大
 
         masterCompressorNode.connect(masterGainNode);
-        masterGainNode.connect(audioCtx.destination);
+        masterGainNode.connect(createdCtx.destination);
       } catch (e) {
         console.warn("Master audio pipeline init error:", e);
       }
     }
   }
-  if (audioCtx && audioCtx.state === 'suspended') {
+  if (audioCtx && isContextRecoverableState(audioCtx.state)) {
     audioCtx.resume().catch(() => {});
   }
   return audioCtx;
 }
 
+/**
+ * 確保共享 AudioContext 處於 running 狀態（含 suspended / Safari interrupted 恢復與逾時保護）
+ */
+export async function ensureSharedAudioContextRunning(timeoutMs: number = 900): Promise<AudioContext | null> {
+  const ctx = getAudioContext();
+  if (!ctx) return null;
+  if (ctx.state === 'running') return ctx;
+  if (!isContextRecoverableState(ctx.state)) return ctx;
+
+  if (!pendingResumePromise) {
+    pendingResumePromise = (async () => {
+      try {
+        await Promise.race([
+          ctx.resume(),
+          new Promise<void>((resolve) => setTimeout(resolve, timeoutMs))
+        ]);
+      } catch {
+        // 瀏覽器若尚未取得使用者手勢可能拒絕 resume，維持安全降級
+      } finally {
+        pendingResumePromise = null;
+      }
+      return audioCtx && audioCtx.state !== 'closed' ? audioCtx : null;
+    })();
+  }
+  return pendingResumePromise;
+}
+
 export const getSharedAudioContext = getAudioContext;
 
 function getMasterAudioDestination(ctx: AudioContext): AudioNode {
-  if (masterCompressorNode) return masterCompressorNode;
+  if (masterCompressorNode && masterCompressorNode.context === ctx) return masterCompressorNode;
   return ctx.destination;
 }
 
 export function isSoundEnabled(): boolean {
-  if (typeof window === 'undefined') return true;
-  return localStorage.getItem('fse_sound_enabled') !== 'false';
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') return true;
+  try {
+    return localStorage.getItem('fse_sound_enabled') !== 'false';
+  } catch {
+    return true;
+  }
 }
 
 export function setSoundEnabled(enabled: boolean): void {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem('fse_sound_enabled', enabled ? 'true' : 'false');
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem('fse_sound_enabled', enabled ? 'true' : 'false');
+  } catch {}
+}
+
+export function isHapticEnabled(): boolean {
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') return true;
+  try {
+    return localStorage.getItem('fse_haptic_enabled') !== 'false';
+  } catch {
+    return true;
+  }
+}
+
+export function setHapticEnabled(enabled: boolean): void {
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem('fse_haptic_enabled', enabled ? 'true' : 'false');
+  } catch {}
+}
+
+/**
+ * 觸覺震動回饋觸發器 (Cleanroom High-Noise Tactile Haptic Feedback)
+ * 透過 navigator.vibrate() 在高噪音無塵室環境中提供精準的短脈衝觸覺確認
+ */
+export function triggerHapticFeedback(pattern: number | number[] = 12): void {
+  if (!isHapticEnabled()) return;
+  try {
+    if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+      navigator.vibrate(pattern);
+    }
+  } catch {}
+}
+
+export function triggerHapticClick(): void {
+  triggerHapticFeedback(10);
+}
+
+export function triggerHapticStepPulse(): void {
+  triggerHapticFeedback(8);
+}
+
+export function triggerHapticPhraseComplete(): void {
+  triggerHapticFeedback([14, 38, 22]);
+}
+
+export function triggerHapticWarning(): void {
+  triggerHapticFeedback([28, 45, 28]);
 }
 
 export function getAmbientSoundType(): AmbientSoundType {
-  if (typeof window === 'undefined') return 'silent';
-  const stored = localStorage.getItem('fse_ambient_sound_type');
-  if (stored === 'fan' || stored === 'alarm' || stored === 'silent') {
-    return stored;
-  }
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') return 'silent';
+  try {
+    const stored = localStorage.getItem('fse_ambient_sound_type');
+    if (stored === 'fan' || stored === 'alarm' || stored === 'silent') {
+      return stored;
+    }
+  } catch {}
   return 'silent';
 }
 
 export function setAmbientSoundType(type: AmbientSoundType): void {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem('fse_ambient_sound_type', type);
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem('fse_ambient_sound_type', type);
+  } catch {}
 }
 
 export function getAmbientSoundVolume(): number {
-  if (typeof window === 'undefined') return 0.25;
-  const stored = localStorage.getItem('fse_ambient_sound_volume');
-  if (stored) {
-    const parsed = parseFloat(stored);
-    if (!isNaN(parsed) && parsed >= 0 && parsed <= 1) {
-      return parsed;
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') return 0.25;
+  try {
+    const stored = localStorage.getItem('fse_ambient_sound_volume');
+    if (stored) {
+      const parsed = parseFloat(stored);
+      if (!isNaN(parsed) && parsed >= 0 && parsed <= 1) {
+        return parsed;
+      }
     }
-  }
+  } catch {}
   return 0.25;
 }
 
 export function setAmbientSoundVolume(vol: number): void {
   if (typeof window === 'undefined') return;
   const clamped = Math.max(0, Math.min(1, vol));
-  localStorage.setItem('fse_ambient_sound_volume', clamped.toString());
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('fse_ambient_sound_volume', clamped.toString());
+    }
+  } catch {}
   if (ambientMasterGain && audioCtx) {
     try {
       ambientMasterGain.gain.setValueAtTime(clamped * 0.16, audioCtx.currentTime);
-    } catch (e) {}
+    } catch {}
   }
 }
 
 export function playClickSound(): void {
+  triggerHapticClick();
   if (!isSoundEnabled()) return;
   const ctx = getAudioContext();
   if (!ctx) return;
@@ -109,21 +216,22 @@ export function playClickSound(): void {
     const gain = ctx.createGain();
     
     osc.type = 'sine';
-    osc.frequency.setValueAtTime(850, ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(320, ctx.currentTime + 0.04);
+    osc.frequency.setValueAtTime(520, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(260, ctx.currentTime + 0.018);
     
-    gain.gain.setValueAtTime(0.18, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.04);
+    gain.gain.setValueAtTime(0.05, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.018);
 
     osc.connect(gain);
     gain.connect(getMasterAudioDestination(ctx));
 
     osc.start();
-    osc.stop(ctx.currentTime + 0.04);
+    osc.stop(ctx.currentTime + 0.018);
   } catch (e) {}
 }
 
 export function playWaferSnapSound(): void {
+  triggerHapticFeedback(14);
   if (!isSoundEnabled()) return;
   const ctx = getAudioContext();
   if (!ctx) return;
@@ -134,20 +242,21 @@ export function playWaferSnapSound(): void {
 
     osc.type = 'triangle';
     osc.frequency.setValueAtTime(460, ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(920, ctx.currentTime + 0.06);
+    osc.frequency.exponentialRampToValueAtTime(920, ctx.currentTime + 0.045);
 
-    gain.gain.setValueAtTime(0.24, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.06);
+    gain.gain.setValueAtTime(0.1, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.045);
 
     osc.connect(gain);
     gain.connect(getMasterAudioDestination(ctx));
 
     osc.start();
-    osc.stop(ctx.currentTime + 0.06);
+    osc.stop(ctx.currentTime + 0.045);
   } catch (e) {}
 }
 
 export function playSuccessChime(): void {
+  triggerHapticPhraseComplete();
   if (!isSoundEnabled()) return;
   const ctx = getAudioContext();
   if (!ctx) return;
@@ -161,28 +270,29 @@ export function playSuccessChime(): void {
     const gain1 = ctx.createGain();
     osc1.type = 'sine';
     osc1.frequency.setValueAtTime(659.25, now);
-    gain1.gain.setValueAtTime(0.22, now);
-    gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.32);
+    gain1.gain.setValueAtTime(0.14, now);
+    gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.24);
     osc1.connect(gain1);
     gain1.connect(dest);
     osc1.start(now);
-    osc1.stop(now + 0.32);
+    osc1.stop(now + 0.24);
 
     // Second note B5
     const osc2 = ctx.createOscillator();
     const gain2 = ctx.createGain();
     osc2.type = 'sine';
-    osc2.frequency.setValueAtTime(987.77, now + 0.1);
-    gain2.gain.setValueAtTime(0.25, now + 0.1);
-    gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.48);
+    osc2.frequency.setValueAtTime(987.77, now + 0.08);
+    gain2.gain.setValueAtTime(0.16, now + 0.08);
+    gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.36);
     osc2.connect(gain2);
     gain2.connect(dest);
-    osc2.start(now + 0.1);
-    osc2.stop(now + 0.48);
+    osc2.start(now + 0.08);
+    osc2.stop(now + 0.36);
   } catch (e) {}
 }
 
 export function playLaserScanSound(): void {
+  triggerHapticFeedback(14);
   if (!isSoundEnabled()) return;
   const ctx = getAudioContext();
   if (!ctx) return;
@@ -191,18 +301,18 @@ export function playLaserScanSound(): void {
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
 
-    osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(1200, ctx.currentTime);
-    osc.frequency.linearRampToValueAtTime(2400, ctx.currentTime + 0.12);
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(640, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.035);
 
-    gain.gain.setValueAtTime(0.14, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
+    gain.gain.setValueAtTime(0.045, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.035);
 
     osc.connect(gain);
     gain.connect(getMasterAudioDestination(ctx));
 
     osc.start();
-    osc.stop(ctx.currentTime + 0.12);
+    osc.stop(ctx.currentTime + 0.035);
   } catch (e) {}
 }
 
@@ -211,6 +321,7 @@ export function playLaserScanSound(): void {
  * 用於句子朗讀結束時的極短柔和聲學音標，自然區隔語句、提升聽覺專注度並防止連續播放時的聽覺疲勞
  */
 export function playCleanroomConfirmationCue(): void {
+  triggerHapticFeedback(12);
   if (!isSoundEnabled()) return;
   const ctx = getAudioContext();
   if (!ctx) return;
@@ -517,6 +628,7 @@ export function playCleanroomAlarmChime(): void {
  * SVO 積木卡榫吸附成功機械卡扣音效 (Robotic Mechanical Lock Chime)
  */
 export function playSvoAssembleChime(): void {
+  triggerHapticFeedback(14);
   if (!isSoundEnabled()) return;
   const ctx = getAudioContext();
   if (!ctx) return;

@@ -39,8 +39,9 @@ export const ScrollToTopButton: React.FC = () => {
           className="fixed bottom-20 md:bottom-6 right-4 sm:right-6 z-40 pointer-events-auto"
         >
           <button
+            type="button"
             onClick={scrollToTop}
-            className="group flex items-center gap-1.5 px-3 py-2.5 rounded-2xl bg-slate-900/90 hover:bg-amber-400 text-amber-300 hover:text-slate-950 border border-amber-400/50 hover:border-amber-300 font-black text-xs shadow-2xl backdrop-blur-md transition-all active:scale-95 cursor-pointer"
+            className="group flex items-center gap-1.5 px-3 py-2.5 rounded-2xl bg-slate-900/90 hover:bg-amber-400 text-amber-300 hover:text-slate-950 border border-amber-400/50 hover:border-amber-300 font-black text-xs shadow-2xl backdrop-blur-md transition-all active:scale-95 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
             title="回到頂部 (Scroll to top)"
             aria-label="回到最頂部"
           >

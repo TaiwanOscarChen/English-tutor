@@ -68,16 +68,16 @@ export const ThreeDayUpdateBanner: React.FC<ThreeDayUpdateBannerProps> = ({
         {/* Left Info: Cycle Badge & Live Countdown */}
         <div className="flex items-start md:items-center gap-3">
           <div className="p-3 rounded-xl bg-gradient-to-br from-cyan-500/20 to-amber-500/20 border border-cyan-400/40 text-cyan-300 shadow-inner shrink-0 mt-0.5 md:mt-0">
-            <Zap className="w-5 h-5 animate-pulse text-amber-300" />
+            <Zap className="w-5 h-5 text-amber-300" />
           </div>
 
           <div>
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-400/40">
-                <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
+              <span className="inline-flex items-center gap-1.5 text-xs font-bold text-cyan-300">
                 每 3 天自動更迭系統
               </span>
-              <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 border border-amber-400/30">
+              <span className="text-slate-600" aria-hidden="true">·</span>
+              <span className="text-xs font-semibold text-amber-300 tabular-nums">
                 第 {cycleNumber} 輪 晶圓 AI 週期
               </span>
             </div>
@@ -101,9 +101,9 @@ export const ThreeDayUpdateBanner: React.FC<ThreeDayUpdateBannerProps> = ({
 
             {/* Live Ticker Timer */}
             <div className="flex items-center gap-1.5 text-xs text-slate-300 mt-1.5">
-              <Clock className="w-3.5 h-3.5 text-cyan-400" />
+              <Clock className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
               <span>離下一輪自動更新還剩：</span>
-              <span className="font-mono font-bold text-amber-300 bg-slate-950/80 px-2 py-0.5 rounded border border-slate-700/80 tracking-wider">
+              <span className="font-mono font-bold text-amber-300 bg-slate-950/80 px-2 py-0.5 rounded border border-slate-700/80 tracking-wider tabular-nums">
                 {daysLeft}天 {hoursLeft.toString().padStart(2, '0')}時 {minutesLeft.toString().padStart(2, '0')}分 {secondsLeft.toString().padStart(2, '0')}秒
               </span>
             </div>
@@ -113,17 +113,21 @@ export const ThreeDayUpdateBanner: React.FC<ThreeDayUpdateBannerProps> = ({
         {/* Right Actions: Manual Update Button & Expand Details */}
         <div className="flex items-center gap-2 self-end md:self-center shrink-0">
           <button
+            type="button"
             onClick={handleTrigger}
             disabled={isUpdating}
-            className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold text-slate-950 bg-gradient-to-r from-cyan-400 via-amber-300 to-yellow-400 hover:from-cyan-300 hover:to-yellow-300 shadow-lg shadow-cyan-500/20 active:scale-95 transition-all disabled:opacity-50"
+            className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold text-slate-950 bg-gradient-to-r from-cyan-400 via-amber-300 to-yellow-400 hover:from-cyan-300 hover:to-yellow-300 shadow-lg shadow-cyan-500/20 active:scale-95 transition-all disabled:opacity-50 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${isUpdating ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`w-3.5 h-3.5 ${isUpdating ? 'motion-safe:animate-spin' : ''}`} />
             <span>{isUpdating ? 'AI 生成更新中...' : '手動觸發 3 天 AI 大更新'}</span>
           </button>
 
           <button
+            type="button"
+            aria-expanded={isExpanded}
+            aria-label="檢視 3 天更迭說明"
             onClick={() => setIsExpanded(!isExpanded)}
-            className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-colors"
+            className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
             title="檢視 3 天更迭說明"
           >
             {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}

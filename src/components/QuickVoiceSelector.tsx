@@ -40,6 +40,8 @@ export const QuickVoiceSelector: React.FC<QuickVoiceSelectorProps> = ({
   const [previewingId, setPreviewingId] = useState<string | null>(null);
   const [showAllList, setShowAllList] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
+  const savedAccentBeforePreviewRef = useRef<ReturnType<typeof getCurrentVoiceSummary>['accentMode'] | null>(null);
+  const isStartingPreviewRef = useRef<boolean>(false);
 
   const refreshVoiceState = () => {
     setVoiceSummary(getCurrentVoiceSummary());
@@ -52,9 +54,20 @@ export const QuickVoiceSelector: React.FC<QuickVoiceSelectorProps> = ({
     const handleVoiceChange = () => {
       refreshVoiceState();
     };
+    const handleSpeechInterrupted = () => {
+      if (isStartingPreviewRef.current) return;
+      setPreviewingId(null);
+      if (savedAccentBeforePreviewRef.current) {
+        const modeToRestore = savedAccentBeforePreviewRef.current;
+        savedAccentBeforePreviewRef.current = null;
+        setPreferredAccentMode(modeToRestore);
+      }
+    };
     window.addEventListener('fse-voice-changed', handleVoiceChange);
+    window.addEventListener('fse-speech-interrupted', handleSpeechInterrupted);
     return () => {
       window.removeEventListener('fse-voice-changed', handleVoiceChange);
+      window.removeEventListener('fse-speech-interrupted', handleSpeechInterrupted);
     };
   }, []);
 
@@ -75,68 +88,80 @@ export const QuickVoiceSelector: React.FC<QuickVoiceSelectorProps> = ({
 
   const handleSelectPreset = (preset: VoicePresetOption) => {
     playClickSound();
-    cancelSpeech();
+    isStartingPreviewRef.current = true;
+    try {
+      savedAccentBeforePreviewRef.current = null;
+      cancelSpeech();
 
-    if (preset.category === 'tw_accent') {
-      setPreferredAccentMode('tw_fab');
-    } else {
-      setPreferredAccentMode('us_standard');
-      setPreferredVoiceURI(preset.voiceURI);
+      if (preset.category === 'tw_accent') {
+        setPreferredAccentMode('tw_fab');
+      } else {
+        setPreferredAccentMode('us_standard');
+        setPreferredVoiceURI(preset.voiceURI);
+      }
+
+      refreshVoiceState();
+      playSuccessChime();
+
+      // 立即以所選口音或聲線朗讀完整實戰範例句
+      speakEnglish(
+        preset.sampleText || "Wafer inspection and cleanroom voice system ready.",
+        0.95,
+        undefined,
+        undefined,
+        100,
+        true
+      );
+    } finally {
+      isStartingPreviewRef.current = false;
     }
-
-    refreshVoiceState();
-    playSuccessChime();
-
-    // Give audio confirmation of the new voice
-    speakEnglish(
-      preset.category === 'tw_accent'
-        ? "台灣晶圓廠在地口音已套用。FOUP check ready."
-        : `Voice switched to ${preset.title.replace(/[^a-zA-Z\s]/g, '').trim() || 'selected voice'}.`,
-      1.0,
-      undefined,
-      undefined,
-      100,
-      true
-    );
   };
 
   const handlePreviewPreset = (e: React.MouseEvent, preset: VoicePresetOption) => {
     e.stopPropagation();
     playClickSound();
-    cancelSpeech();
-    setPreviewingId(preset.id);
+    isStartingPreviewRef.current = true;
+    try {
+      if (!savedAccentBeforePreviewRef.current) {
+        savedAccentBeforePreviewRef.current = voiceSummary.accentMode;
+      }
+      cancelSpeech();
+      setPreviewingId(preset.id);
 
-    if (preset.category === 'tw_accent') {
-      // Temporarily test in tw_accent
-      const prevMode = voiceSummary.accentMode;
-      setPreferredAccentMode('tw_fab');
-      speakEnglish(
-        preset.sampleText,
-        0.95,
-        () => {
-          setPreviewingId(null);
-          setPreferredAccentMode(prevMode);
-        },
-        undefined,
-        100,
-        true
-      );
-    } else {
-      const prevMode = voiceSummary.accentMode;
-      setPreferredAccentMode('us_standard');
-      if (preset.voiceURI) setPreferredVoiceURI(preset.voiceURI);
+      const restoreAfterPreview = () => {
+        setPreviewingId(null);
+        if (savedAccentBeforePreviewRef.current) {
+          const modeToRestore = savedAccentBeforePreviewRef.current;
+          savedAccentBeforePreviewRef.current = null;
+          setPreferredAccentMode(modeToRestore);
+        }
+      };
 
-      speakEnglish(
-        preset.sampleText,
-        0.95,
-        () => {
-          setPreviewingId(null);
-          setPreferredAccentMode(prevMode);
-        },
-        undefined,
-        100,
-        true
-      );
+      if (preset.category === 'tw_accent') {
+        setPreferredAccentMode('tw_fab');
+        speakEnglish(
+          preset.sampleText,
+          0.95,
+          restoreAfterPreview,
+          undefined,
+          100,
+          true
+        );
+      } else {
+        setPreferredAccentMode('us_standard');
+        if (preset.voiceURI) setPreferredVoiceURI(preset.voiceURI);
+
+        speakEnglish(
+          preset.sampleText,
+          0.95,
+          restoreAfterPreview,
+          undefined,
+          100,
+          true
+        );
+      }
+    } finally {
+      isStartingPreviewRef.current = false;
     }
   };
 
@@ -192,7 +217,7 @@ export const QuickVoiceSelector: React.FC<QuickVoiceSelectorProps> = ({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: -6 }}
             transition={{ duration: 0.15 }}
-            className="absolute left-0 sm:right-0 sm:left-auto mt-2 w-[310px] sm:w-[360px] bg-slate-900/98 backdrop-blur-xl border border-cyan-500/30 rounded-2xl shadow-2xl p-3.5 text-slate-100 z-50 space-y-3"
+            className="fixed inset-x-3 top-16 sm:absolute sm:inset-x-auto sm:right-0 sm:top-auto sm:mt-2 w-auto sm:w-[360px] max-w-[calc(100vw-1.5rem)] bg-slate-900/98 backdrop-blur-xl border border-cyan-500/30 rounded-2xl shadow-2xl p-3.5 text-slate-100 z-50 space-y-3"
           >
             {/* Header */}
             <div className="flex items-center justify-between pb-2 border-b border-slate-800">
@@ -235,7 +260,7 @@ export const QuickVoiceSelector: React.FC<QuickVoiceSelectorProps> = ({
                           {preset.title}
                         </span>
                         {isSelected && (
-                          <span className="px-1.5 py-0.2 rounded text-[9px] bg-cyan-400 text-slate-950 font-black">
+                          <span className="px-1.5 py-0.5 rounded text-[9px] bg-cyan-400 text-slate-950 font-black">
                             使用中
                           </span>
                         )}
@@ -251,7 +276,7 @@ export const QuickVoiceSelector: React.FC<QuickVoiceSelectorProps> = ({
                       onClick={(e) => handlePreviewPreset(e, preset)}
                       className={`p-1.5 rounded-lg text-[10px] font-bold border flex items-center gap-1 transition-all shrink-0 cursor-pointer ${
                         isPreviewing
-                          ? 'bg-amber-400 text-slate-950 border-amber-300 animate-pulse'
+                          ? 'bg-amber-400 text-slate-950 border-amber-300'
                           : 'bg-slate-900 border-slate-700 text-slate-300 hover:text-cyan-300 hover:border-cyan-500/50'
                       }`}
                       title="試聽此聲線"

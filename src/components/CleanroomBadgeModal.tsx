@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Award, CheckCircle2, Lock, Sparkles } from 'lucide-react';
 import confetti from 'canvas-confetti';
@@ -72,6 +72,15 @@ export const CleanroomBadgeModal: React.FC<CleanroomBadgeModalProps> = ({
   onClose,
   streakCount
 }) => {
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const currentBadge = BADGES.slice().reverse().find((b) => streakCount >= b.minStreak) || BADGES[0];
@@ -90,8 +99,15 @@ export const CleanroomBadgeModal: React.FC<CleanroomBadgeModalProps> = ({
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-md">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="無塵室工程師階級勳章成就館"
+        onClick={onClose}
+        className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-md"
+      >
         <motion.div
+          onClick={(e) => e.stopPropagation()}
           initial={{ opacity: 0, scale: 0.95, y: 15 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95, y: 15 }}
@@ -108,14 +124,17 @@ export const CleanroomBadgeModal: React.FC<CleanroomBadgeModalProps> = ({
                 <h3 className="text-sm font-black text-white flex items-center gap-2">
                   無塵室工程師階級勳章成就館
                 </h3>
-                <p className="text-[10px] text-slate-400 font-medium">
+                <p className="text-[10px] text-slate-400 font-medium tabular-nums">
                   目前累積連續學習：{streakCount} 天 🔥
                 </p>
               </div>
             </div>
             <button
+              type="button"
+              aria-label="關閉成就館"
               onClick={onClose}
-              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors cursor-pointer"
+              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+              title="關閉視窗 (Esc)"
             >
               <X className="w-4 h-4" />
             </button>
@@ -125,7 +144,7 @@ export const CleanroomBadgeModal: React.FC<CleanroomBadgeModalProps> = ({
           <div className="p-4 bg-slate-950/80 border-b border-slate-800 text-center space-y-2 shrink-0">
             <div className="inline-flex p-3 rounded-2xl bg-slate-900 border border-amber-400/80 shadow-md relative group">
               <span className="text-4xl">{currentBadge.icon}</span>
-              <div className="absolute -top-1.5 -right-1.5 bg-amber-400 text-slate-950 text-[9px] font-black px-1.5 py-0.2 rounded-full shadow-sm">
+              <div className="absolute -top-1.5 -right-1.5 bg-amber-400 text-slate-950 text-[9px] font-black px-1.5 py-0.5 rounded-md shadow-sm">
                 CURRENT
               </div>
             </div>
@@ -143,8 +162,9 @@ export const CleanroomBadgeModal: React.FC<CleanroomBadgeModalProps> = ({
             </div>
 
             <button
+              type="button"
               onClick={handleTriggerConfetti}
-              className="px-3.5 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs inline-flex items-center gap-1 cursor-pointer shadow-sm transition-all hover:scale-105 active:scale-95"
+              className="px-3.5 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs inline-flex items-center gap-1 cursor-pointer shadow-sm transition-colors active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
             >
               <Sparkles className="w-3.5 h-3.5" />
               <span>點擊釋放慶祝煙火</span>
@@ -190,7 +210,7 @@ export const CleanroomBadgeModal: React.FC<CleanroomBadgeModalProps> = ({
                         <span>已解鎖</span>
                       </span>
                     ) : (
-                      <span className="px-2.5 py-0.5 rounded-lg bg-slate-800 text-slate-400 text-[11px] font-bold inline-flex items-center gap-1">
+                      <span className="px-2.5 py-0.5 rounded-lg bg-slate-800 text-slate-400 text-[11px] font-bold inline-flex items-center gap-1 tabular-nums">
                         <Lock className="w-3 h-3" />
                         <span>需 {badge.minStreak} 天</span>
                       </span>
@@ -204,8 +224,9 @@ export const CleanroomBadgeModal: React.FC<CleanroomBadgeModalProps> = ({
           {/* Footer */}
           <div className="p-3 bg-slate-950 border-t border-slate-800 flex justify-end shrink-0">
             <button
+              type="button"
               onClick={onClose}
-              className="px-4 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs cursor-pointer"
+              className="px-4 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
             >
               關閉視窗
             </button>

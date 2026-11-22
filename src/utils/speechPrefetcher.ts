@@ -15,13 +15,15 @@ import {
   findTaiwanChineseVoice,
   getAllAvailableVoices,
   getPreferredSpeechPitch,
-  unlockAudioContext
+  unlockAudioContext,
+  splitTtsChunks,
+  fetchAndBufferCloudAudioBlob,
+  getAudioBufferStats
 } from './speech';
 import {
-  saveAudioSnippetToCache,
-  getCachedAudioSnippet,
-  generateAudioCacheKey
+  getCachedAudioSnippet
 } from './audioCacheDB';
+import { getLessonAllSentences } from './lessonSentenceHelper';
 import { Lesson } from '../types';
 
 export interface PrefetchedSpeechItem {
@@ -37,7 +39,7 @@ export interface PrefetchedSpeechItem {
 }
 
 // 記憶體中的高優先 LRU 快取池
-const MEMORY_CACHE_LIMIT = 200;
+const MEMORY_CACHE_LIMIT = 300;
 const memorySpeechCache = new Map<string, PrefetchedSpeechItem>();
 
 // 預載工作佇列與狀態
@@ -82,7 +84,7 @@ export function getPrefetchedSpeech(text: string, lang: string = 'en-US', rate: 
 }
 
 /**
- * 預熱與快取單一文字（可為英文或中文）
+ * 預熱與快取單一文字（可為英文或中文），直接寫入與 AudioScheduler 共用的 RAM Blob 快取池與 IndexedDB
  */
 export async function prefetchSpeechText(
   rawText: string,
@@ -95,16 +97,22 @@ export async function prefetchSpeechText(
   const pitch = customPitch !== undefined ? customPitch : getPreferredSpeechPitch();
   const key = getPrefetchKey(rawText, lang, rate, pitch);
 
-  // 1. 檢查記憶體快取
-  if (memorySpeechCache.has(key)) {
-    const existing = memorySpeechCache.get(key)!;
-    return existing;
-  }
-
-  // 2. 進行智慧正規化與晶圓詞庫音素替換
+  // 1. 進行智慧正規化與晶圓詞庫音素替換
   const isEn = lang.startsWith('en');
+  const targetLang: 'en-US' | 'zh-TW' = isEn ? 'en-US' : 'zh-TW';
   const cleanedText = isEn ? cleanEnglishText(rawText) : preprocessSpeechText(rawText, false);
   if (!cleanedText) return null;
+
+  // 2. 檢查記憶體快取
+  if (memorySpeechCache.has(key)) {
+    const existing = memorySpeechCache.get(key)!;
+    // 確保共用 RAM Blob 快取亦已根據對應語速 (rate) 就緒
+    const chunks = splitTtsChunks(cleanedText, 155);
+    chunks.forEach((c) => {
+      fetchAndBufferCloudAudioBlob(c, targetLang, 4500, rate, true).catch(() => {});
+    });
+    return existing;
+  }
 
   // 3. 解析與綁定最佳語音
   const allVoices = getAllAvailableVoices();
@@ -115,7 +123,7 @@ export async function prefetchSpeechText(
     key,
     rawText,
     cleanedText,
-    lang,
+    lang: targetLang,
     rate,
     pitch,
     voiceName,
@@ -123,12 +131,13 @@ export async function prefetchSpeechText(
     prewarmed: false
   };
 
-  // 4. 寫入 IndexedDB 持久化記錄 (輕量標記，避免每次重新運算)
-  try {
-    saveAudioSnippetToCache(cleanedText, lang, rate, {
-      durationMs: Math.max(500, Math.round(cleanedText.length * 80))
-    }).catch(() => {});
-  } catch {}
+  // 4. 背景預載實體雲端音訊 Blob 至共用 RAM 快取與 IndexedDB（根據 rate 提前緩存，確保切換關卡或點擊時 0ms 瞬發播放）
+  if (typeof navigator !== 'undefined' && navigator.onLine !== false) {
+    const chunks = splitTtsChunks(cleanedText, 155);
+    for (const chunk of chunks) {
+      fetchAndBufferCloudAudioBlob(chunk, targetLang, 5000, rate, true).catch(() => {});
+    }
+  }
 
   // 5. 存入記憶體快取 (LRU 清理)
   if (memorySpeechCache.size >= MEMORY_CACHE_LIMIT) {
@@ -175,15 +184,15 @@ async function processPrefetchQueue(): Promise<void> {
 
   try {
     // 釋放主線程給 React 渲染
-    await new Promise((r) => setTimeout(r, 60));
+    await new Promise((r) => setTimeout(r, 40));
 
     while (pendingPrefetchQueue.length > 0) {
       const nextTask = pendingPrefetchQueue.shift();
       if (nextTask) {
         await prefetchSpeechText(nextTask.text, nextTask.lang, nextTask.rate, nextTask.pitch);
       }
-      // 避免佔用 CPU，每項之間讓出 30ms
-      await new Promise((r) => setTimeout(r, 30));
+      // 避免佔用 CPU，每項之間讓出 25ms
+      await new Promise((r) => setTimeout(r, 25));
     }
   } catch (err) {
     console.warn("Prefetch queue processing error:", err);
@@ -193,49 +202,65 @@ async function processPrefetchQueue(): Promise<void> {
 }
 
 /**
- * 【教材智慧管線預加載 (Lookahead Next Lessons)】
- * 當前正在學習 currentIndex 時，自動背景預先加載前後鄰近的 2~3 個句子及其中文與 SVO
+ * 【教材智慧管線預加載 (Lookahead Current & Next Lessons)】
+ * 當前正在學習 currentIndex 時，立即高優先預緩衝當前課程所有子句與 SVO 組件，並背景預載前後鄰近課程
  */
 export function prefetchAdjacentLessons(
   lessons: Lesson[],
   currentIndex: number,
-  lookaheadCount: number = 3,
+  lookaheadCount: number = 2,
   speechRate: number = 0.95
 ): void {
   if (!lessons || lessons.length === 0) return;
 
   const total = lessons.length;
-  const targetIndices: number[] = [];
+  const currentLesson = lessons[currentIndex];
 
-  // 優先加載下一個 (Next +1, Next +2, Next +3)，以及上一個 (Prev -1)
+  // 1. 最高優先：當前課程的所有子句、中文釋義與 SVO 結構拆解組件
+  if (currentLesson) {
+    const currentEn: string[] = [];
+    const currentZh: string[] = [];
+    const allSentences = getLessonAllSentences(currentLesson);
+    allSentences.forEach((s) => {
+      if (s.english) currentEn.push(s.english);
+      if (s.chinese) currentZh.push(s.chinese);
+    });
+    if (currentLesson.components) {
+      const cleanSub = currentLesson.components.subject.replace(/[\(（][^\)）]*[\)）]/g, '').trim();
+      const cleanAct = currentLesson.components.action.replace(/[\(（][^\)）]*[\)）]/g, '').trim();
+      const cleanBri = (currentLesson.components.bridge || '').replace(/[\(（][^\)）]*[\)）]/g, '').trim();
+      const cleanObj = currentLesson.components.object.replace(/[\(（][^\)）]*[\)）]/g, '').trim();
+      [cleanSub, cleanAct, cleanBri, cleanObj].forEach((part) => {
+        if (part) currentEn.push(part);
+      });
+    }
+    enqueuePrefetch(currentEn, 'en-US', speechRate, 'high');
+    enqueuePrefetch(currentZh, 'zh-TW', 1.0, 'high');
+  }
+
+  // 2. 次高優先：前後鄰近課程 (Next +1, Next +2, Prev -1)
+  const targetIndices: number[] = [];
   targetIndices.push((currentIndex + 1) % total);
   if (lookaheadCount >= 2) targetIndices.push((currentIndex + 2) % total);
-  if (lookaheadCount >= 3) targetIndices.push((currentIndex + 3) % total);
   targetIndices.push((currentIndex - 1 + total) % total);
 
   const englishPhrases: string[] = [];
   const chinesePhrases: string[] = [];
 
   targetIndices.forEach((idx) => {
+    if (idx === currentIndex) return;
     const lesson = lessons[idx];
     if (lesson) {
-      if (lesson.english_sentence) englishPhrases.push(lesson.english_sentence);
-      if (lesson.scenario) chinesePhrases.push(lesson.scenario);
-      if (lesson.chinese_translation) chinesePhrases.push(lesson.chinese_translation);
-      
-      // SVO 拆解句子
-      if (lesson.components) {
-        const cleanSub = lesson.components.subject.replace(/[\(（][^\)）]*[\)）]/g, '').trim();
-        const cleanAct = lesson.components.action.replace(/[\(（][^\)）]*[\)）]/g, '').trim();
-        const cleanObj = lesson.components.object.replace(/[\(（][^\)）]*[\)）]/g, '').trim();
-        englishPhrases.push(`Subject: ${cleanSub}. Action: ${cleanAct}. Object: ${cleanObj}`);
-      }
+      const sentences = getLessonAllSentences(lesson);
+      sentences.slice(0, 2).forEach((s) => {
+        if (s.english) englishPhrases.push(s.english);
+        if (s.chinese) chinesePhrases.push(s.chinese);
+      });
     }
   });
 
-  // 加入高優先佇列
-  enqueuePrefetch(englishPhrases, 'en-US', speechRate, 'high');
-  enqueuePrefetch(chinesePhrases, 'zh-TW', 1.0, 'normal');
+  enqueuePrefetch(englishPhrases, 'en-US', speechRate, 'normal');
+  enqueuePrefetch(chinesePhrases, 'zh-TW', 1.0, 'low');
 }
 
 /**
@@ -285,9 +310,11 @@ export function warmupCommonFabVocabulary(presetLessons: Lesson[], speechRate: n
  * 取得當前快取狀態與預加載統計數據
  */
 export function getPrefetchStats() {
+  const bufStats = getAudioBufferStats();
   return {
     ...prefetchStats,
-    memoryCacheCount: memorySpeechCache.size,
+    memoryCacheCount: Math.max(memorySpeechCache.size, bufStats.ramCachedBlobs),
+    cacheHits: prefetchStats.cacheHits + bufStats.cacheHitCount,
     pendingQueueCount: pendingPrefetchQueue.length
   };
 }
@@ -302,5 +329,261 @@ export function clearPrefetchCache(): void {
     totalPrefetched: 0,
     cacheHits: 0,
     cacheMisses: 0
+  };
+}
+
+export interface CloudAudioBatchProgress {
+  done: number;
+  total: number;
+  percent: number;
+  newlyDownloaded: number;
+  alreadyCached: number;
+  failed: number;
+  retriedCount: number;
+  currentText: string;
+}
+
+export interface CloudAudioBatchOptions {
+  speechSpeed?: number;
+  concurrency?: number;
+  maxRetries?: number;
+}
+
+/**
+ * 批次下載真實高音質雲端音訊 Blob (/api/tts) 並存入 RAM 與 IndexedDB（支援弱網自動重試、多通道併發與進度百分比計算）
+ * 讓地下無塵室 / 網速不穩或無訊號環境可達成 100% 離線原音播放
+ */
+export async function prefetchCloudAudioBatch(
+  items: Array<{ text: string; lang?: 'en-US' | 'zh-TW'; speechSpeed?: number }>,
+  onProgress?: (progress: CloudAudioBatchProgress) => void,
+  signal?: AbortSignal,
+  options?: CloudAudioBatchOptions
+): Promise<CloudAudioBatchProgress> {
+  const defaultSpeed =
+    typeof options?.speechSpeed === 'number' && options.speechSpeed > 0 ? options.speechSpeed : 0.85;
+  const concurrency = Math.max(1, Math.min(3, options?.concurrency ?? 2));
+  const maxRetries = Math.max(0, Math.min(3, options?.maxRetries ?? 2));
+
+  const chunkTasks: Array<{ chunkText: string; lang: 'en-US' | 'zh-TW'; speed: number }> = [];
+  const seen = new Set<string>();
+
+  for (const item of items) {
+    if (!item?.text?.trim()) continue;
+    const lang: 'en-US' | 'zh-TW' = item.lang === 'zh-TW' ? 'zh-TW' : 'en-US';
+    const itemSpeed =
+      typeof item.speechSpeed === 'number' && item.speechSpeed > 0 ? item.speechSpeed : defaultSpeed;
+    const speedTier = itemSpeed <= 0.72 ? 'slow' : 'std';
+    const isEn = lang === 'en-US';
+    const cleaned = isEn ? cleanEnglishText(item.text) : preprocessSpeechText(item.text, false);
+    if (!cleaned) continue;
+
+    const chunks = splitTtsChunks(cleaned, 155);
+    for (const chunkText of chunks) {
+      const dedupeKey = `${lang}::${speedTier}::${chunkText.toLowerCase()}`;
+      if (!seen.has(dedupeKey)) {
+        seen.add(dedupeKey);
+        chunkTasks.push({ chunkText, lang, speed: itemSpeed });
+      }
+    }
+  }
+
+  const progress: CloudAudioBatchProgress = {
+    done: 0,
+    total: chunkTasks.length,
+    percent: chunkTasks.length === 0 ? 100 : 0,
+    newlyDownloaded: 0,
+    alreadyCached: 0,
+    failed: 0,
+    retriedCount: 0,
+    currentText: ''
+  };
+
+  const emitProgress = () => {
+    progress.percent =
+      progress.total > 0 ? Math.min(100, Math.round((progress.done / progress.total) * 100)) : 100;
+    if (onProgress) {
+      onProgress({ ...progress });
+    }
+  };
+
+  emitProgress();
+  if (chunkTasks.length === 0) return progress;
+
+  let cursor = 0;
+
+  const downloadSingleChunkWithRetry = async (task: {
+    chunkText: string;
+    lang: 'en-US' | 'zh-TW';
+    speed: number;
+  }): Promise<'cached' | 'downloaded' | 'failed'> => {
+    if (signal?.aborted) return 'failed';
+
+    try {
+      const existing = await getCachedAudioSnippet(task.chunkText, task.lang, task.speed).catch(() => null);
+      if (existing?.audioBlob && existing.audioBlob.size > 64) {
+        await fetchAndBufferCloudAudioBlob(task.chunkText, task.lang, 3000, task.speed, true).catch(() => null);
+        return 'cached';
+      }
+    } catch {}
+
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      return 'failed';
+    }
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      if (signal?.aborted) return 'failed';
+      if (attempt > 0) {
+        progress.retriedCount++;
+        emitProgress();
+        // 指數退避等待，適應無塵室邊緣網路瞬斷或訊號波動
+        await new Promise((r) => setTimeout(r, 320 * attempt));
+        if (signal?.aborted) return 'failed';
+      }
+
+      try {
+        const timeoutMs = 6500 + attempt * 2000;
+        const blob = await fetchAndBufferCloudAudioBlob(
+          task.chunkText,
+          task.lang,
+          timeoutMs,
+          task.speed,
+          true
+        );
+        if (blob && blob.size > 64) {
+          return 'downloaded';
+        }
+      } catch {
+        if (signal?.aborted) return 'failed';
+      }
+    }
+
+    return 'failed';
+  };
+
+  const runWorker = async () => {
+    while (cursor < chunkTasks.length && !signal?.aborted) {
+      const idx = cursor++;
+      const task = chunkTasks[idx];
+      if (!task) break;
+
+      progress.currentText = task.chunkText;
+      emitProgress();
+
+      const outcome = await downloadSingleChunkWithRetry(task);
+      if (signal?.aborted) break;
+
+      if (outcome === 'cached') {
+        progress.alreadyCached++;
+      } else if (outcome === 'downloaded') {
+        progress.newlyDownloaded++;
+      } else {
+        progress.failed++;
+      }
+
+      progress.done++;
+      emitProgress();
+
+      if (!signal?.aborted) {
+        await new Promise((r) => setTimeout(r, 25));
+      }
+    }
+  };
+
+  const workers = Array.from({ length: Math.min(concurrency, chunkTasks.length) }, () => runWorker());
+  await Promise.all(workers);
+
+  if (!signal?.aborted && progress.done >= progress.total) {
+    progress.percent = 100;
+    progress.currentText = '';
+    emitProgress();
+  }
+
+  return progress;
+}
+
+const IDLE_PREFETCH_PREF_KEY = 'fse_idle_audio_prefetch_v1';
+let hasRunIdleSafetyPrefetch = false;
+
+export function isIdleAudioPrefetchEnabled(): boolean {
+  if (typeof window === 'undefined') return true;
+  try {
+    const raw = localStorage.getItem(IDLE_PREFETCH_PREF_KEY);
+    if (raw === 'false') return false;
+    return true;
+  } catch {
+    return true;
+  }
+}
+
+export function setIdleAudioPrefetchEnabled(enabled: boolean): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(IDLE_PREFETCH_PREF_KEY, enabled ? 'true' : 'false');
+  } catch {}
+}
+
+/**
+ * 閒置低頻寬自動補齊：僅在穩定連線、非省流量模式 (saveData=false) 且頁面閒置時，
+ * 以單執行緒 (concurrency=1) 背景補齊最多 6 段尚未快取的工安／高頻交接語音，嚴格控管流量與額度。
+ */
+export function scheduleIdleSafetyAudioPrefetch(
+  items: Array<{ text: string; lang: 'en-US' | 'zh-TW' }>,
+  speechSpeed: number = 0.95,
+  maxNewClipsPerSession: number = 6
+): () => void {
+  if (typeof window === 'undefined' || hasRunIdleSafetyPrefetch || !isIdleAudioPrefetchEnabled()) {
+    return () => {};
+  }
+
+  let cancelled = false;
+  const controller = new AbortController();
+
+  const runIdleTask = async () => {
+    if (cancelled || hasRunIdleSafetyPrefetch) return;
+    if (typeof navigator !== 'undefined') {
+      if (navigator.onLine === false) return;
+      const conn = (navigator as any).connection;
+      if (conn?.saveData) return;
+      if (conn?.effectiveType === 'slow-2g' || conn?.effectiveType === '2g') return;
+    }
+
+    hasRunIdleSafetyPrefetch = true;
+    const uncached: Array<{ text: string; lang: 'en-US' | 'zh-TW' }> = [];
+
+    for (const item of items) {
+      if (cancelled || uncached.length >= maxNewClipsPerSession) break;
+      const cleaned = cleanEnglishText(item.text);
+      if (!cleaned) continue;
+      const existing = await getCachedAudioSnippet(cleaned, item.lang, 1.0).catch(() => null);
+      if (!existing?.audioBlob) {
+        uncached.push({ text: cleaned, lang: item.lang });
+      }
+    }
+
+    if (cancelled || uncached.length === 0) return;
+
+    await prefetchCloudAudioBatch(uncached, undefined, controller.signal, {
+      speechSpeed,
+      concurrency: 1,
+      maxRetries: 1,
+    }).catch(() => {});
+  };
+
+  const timerId = window.setTimeout(() => {
+    if (cancelled) return;
+    const ric = (window as any).requestIdleCallback;
+    if (typeof ric === 'function') {
+      ric(() => {
+        runIdleTask().catch(() => {});
+      }, { timeout: 6000 });
+    } else {
+      runIdleTask().catch(() => {});
+    }
+  }, 8500);
+
+  return () => {
+    cancelled = true;
+    window.clearTimeout(timerId);
+    controller.abort();
   };
 }

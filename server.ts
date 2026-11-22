@@ -1,10 +1,11 @@
 process.env.DISABLE_HMR = "true";
 
 import express from "express";
+import fs from "fs";
 import path from "path";
 import { createServer as createViteServer } from "vite";
-import { GoogleGenAI, Type } from "@google/genai";
-import { fabDatabase } from "./src/server/database";
+import { GoogleGenAI, ThinkingLevel, Type } from "@google/genai";
+import { fabDatabase, isValidProfileUserId } from "./src/server/database";
 import { lookupWordDefinition, getWordKKPhonetic } from "./src/utils/wordDictionary";
 import { convertPhoneticToZhuyin } from "./src/utils/zhuyinHelper";
 import { auditAndConvertImportedData, sanitizeTextToPublicSafe, sanitizeLessonToPublicSafe } from "./src/utils/pipSanitizer";
@@ -30,13 +31,87 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 });
 
 // Security & Cache-Control Middleware for API resilience
+app.disable("x-powered-by");
 app.use((req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader("Permissions-Policy", "camera=(), geolocation=()");
+  res.setHeader("X-XSS-Protection", "0");
   if (req.path.startsWith("/api/")) {
     res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
   }
   next();
 });
+
+// Lightweight In-Memory Sliding-Window Rate Limiter for AI & Proxy Protection
+interface RateBucket {
+  count: number;
+  resetAt: number;
+}
+const rateLimitStores = new Set<Map<string, RateBucket>>();
+const rateLimitCleanup = setInterval(() => {
+  const now = Date.now();
+  for (const store of rateLimitStores) {
+    for (const [key, bucket] of store.entries()) {
+      if (now >= bucket.resetAt) {
+        store.delete(key);
+      }
+    }
+  }
+}, 60_000);
+if (typeof rateLimitCleanup.unref === "function") {
+  rateLimitCleanup.unref();
+}
+
+function createRateLimiter(options: { windowMs: number; maxRequests: number; label: string }) {
+  const store = new Map<string, RateBucket>();
+  rateLimitStores.add(store);
+  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const ip = req.ip || req.socket?.remoteAddress || "unknown";
+    const key = `${options.label}:${ip}`;
+    const now = Date.now();
+    const existing = store.get(key);
+    if (!existing || now >= existing.resetAt) {
+      store.set(key, { count: 1, resetAt: now + options.windowMs });
+      return next();
+    }
+    if (existing.count >= options.maxRequests) {
+      const retryAfterSec = Math.max(1, Math.ceil((existing.resetAt - now) / 1000));
+      res.setHeader("Retry-After", String(retryAfterSec));
+      return res.status(429).json({
+        success: false,
+        error: "Too many requests; please wait briefly before retrying.",
+        retryAfterSec,
+      });
+    }
+    existing.count += 1;
+    return next();
+  };
+}
+
+const aiRateLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 120, label: "ai" });
+const ttsRateLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 1200, label: "tts" });
+const syncRateLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 120, label: "sync" });
+
+app.use(
+  [
+    "/api/generate-lesson",
+    "/api/generate-article",
+    "/api/generate-remediation",
+    "/api/3day-auto-update",
+    "/api/analyze-speech",
+    "/api/error-code-handover",
+    "/api/decompose-sentence",
+    "/api/import-media-english",
+    "/api/chat",
+    "/api/chat-stream",
+    "/api/stress-test",
+    "/api/optimize-lessons-elementary",
+  ],
+  aiRateLimiter
+);
+
+app.use(["/api/sync/push", "/api/sync/pull", "/api/sync/snapshot"], syncRateLimiter);
 
 app.use(express.static(path.join(process.cwd(), "public")));
 
@@ -58,6 +133,16 @@ function getGenAIClient() {
 
 // Cooldown map to track models experiencing temporary upstream high demand (503 / 429)
 const modelCongestionCooldown = new Map<string, number>();
+let lastAiFailureInfo: { model: string; message: string; at: string } | null = null;
+let lastTtsFailureInfo: { model: string; message: string; at: string } | null = null;
+
+function sanitizeErrorSummary(raw: any): string {
+  return String(raw?.message || raw || "Unknown error")
+    .replace(/AIza[0-9A-Za-z_-]{20,}/g, "[REDACTED]")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 160);
+}
 
 // In-memory cache for 3-day update bundles to prevent quota exhaustion and ensure instant delivery
 const cycleBundleCache = new Map<number, any>();
@@ -82,14 +167,42 @@ function areAllModelsCoolingDown(models: string[]): boolean {
  * Robust Gemini Content Generator with multi-model fallback & transient retry
  * Handles 503 (High Demand / Spikes), 429 (Rate Limits), and UNAVAILABLE errors gracefully.
  */
+async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  return Promise.race([
+    promise.finally(() => clearTimeout(timer)),
+    new Promise<T>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    }),
+  ]);
+}
+
+function safeParseJson<T = any>(rawText?: string, fallback: T = {} as T): T {
+  if (!rawText || typeof rawText !== "string") return fallback;
+  const cleaned = rawText
+    .replace(/^\s*```(?:json)?\s*/i, "")
+    .replace(/\s*```\s*$/i, "")
+    .trim();
+  if (!cleaned) return fallback;
+  try {
+    return JSON.parse(cleaned) as T;
+  } catch {
+    return fallback;
+  }
+}
+
 async function generateContentWithRetry(
   ai: GoogleGenAI,
   params: {
     contents: any;
     config?: any;
   },
-  primaryModel = "gemini-3-flash-preview",
-  fallbackModels: string[] = ["gemini-3.1-flash-lite-preview", "gemini-2.5-flash"]
+  primaryModel = "gemini-4-hydrogen",
+  fallbackModels: string[] = ["gemini-3.1-flash-lite"],
+  options?: {
+    primaryTimeoutMs?: number;
+    fallbackTimeoutMs?: number;
+  }
 ) {
   // Candidate pool with congested models shifted to the back
   const allCandidates = Array.from(new Set([primaryModel, ...fallbackModels]));
@@ -109,24 +222,58 @@ async function generateContentWithRetry(
       continue;
     }
 
+    // gemini-4-* does not accept temperature, topP, topK, candidateCount, or thinkingBudget;
+    // default to ThinkingLevel.LOW for fast interactive latency unless explicitly specified.
+    let sanitizedConfig: any = params.config ? { ...params.config } : {};
+    if (model.startsWith("gemini-4-")) {
+      const { temperature, topP, topK, candidateCount, thinkingConfig, ...restConfig } = sanitizedConfig;
+      sanitizedConfig = { ...restConfig };
+      const cleanedThinking: Record<string, any> =
+        thinkingConfig && typeof thinkingConfig === "object"
+          ? Object.fromEntries(Object.entries(thinkingConfig).filter(([k]) => k !== "thinkingBudget"))
+          : {};
+      if (!cleanedThinking.thinkingLevel) {
+        cleanedThinking.thinkingLevel = ThinkingLevel.LOW;
+      }
+      sanitizedConfig.thinkingConfig = cleanedThinking;
+    } else if (!model.startsWith("gemini-3") && sanitizedConfig?.thinkingConfig?.thinkingLevel) {
+      // thinkingLevel is only available for Gemini 3 and Gemini 4 series models
+      const { thinkingLevel, ...restThinking } = sanitizedConfig.thinkingConfig;
+      if (Object.keys(restThinking).length > 0) {
+        sanitizedConfig.thinkingConfig = restThinking;
+      } else {
+        delete sanitizedConfig.thinkingConfig;
+      }
+    }
+
+    const callStart = Date.now();
+    const attemptTimeoutMs =
+      modelIdx < candidateModels.length - 1
+        ? options?.primaryTimeoutMs ?? 15000
+        : options?.fallbackTimeoutMs ?? 20000;
     try {
-      const response = await ai.models.generateContent({
-        model,
-        contents: params.contents,
-        config: params.config,
-      });
-      // Clear congestion if this model succeeded
+      const response = await withTimeout(
+        ai.models.generateContent({
+          model,
+          contents: params.contents,
+          config: Object.keys(sanitizedConfig).length > 0 ? sanitizedConfig : undefined,
+        }),
+        attemptTimeoutMs,
+        `Gemini:${model}`
+      );
+      const elapsedMs = Date.now() - callStart;
+      // Clear congestion & transient failure state if this candidate succeeded
       if (modelCongestionCooldown.has(model)) {
         modelCongestionCooldown.delete(model);
       }
-      if (modelIdx > 0) {
-        console.info(`[Gemini API] Request completed successfully using fallback model: ${model}`);
-      }
+      lastAiFailureInfo = null;
+      console.info(`[Gemini API] Completed via ${model} in ${elapsedMs}ms`);
       return response;
     } catch (err: any) {
       lastError = err;
+      const elapsedMs = Date.now() - callStart;
       const errMsg = (err?.message || "").toLowerCase();
-      const isTransient =
+      const isUpstreamCongestion =
         errMsg.includes("503") ||
         errMsg.includes("unavailable") ||
         errMsg.includes("high demand") ||
@@ -134,19 +281,24 @@ async function generateContentWithRetry(
         errMsg.includes("resource_exhausted") ||
         errMsg.includes("quota") ||
         errMsg.includes("overloaded");
+      const isLocalTimeout = errMsg.includes("timed out");
 
-      if (isTransient) {
-        // Mark model as congested for 60 seconds so subsequent requests skip directly to healthy models
-        markModelCongested(model, 60000);
-        const nextModel = candidateModels[modelIdx + 1];
-        if (nextModel) {
-          console.info(`[Gemini Resilience] Model ${model} is currently at peak capacity. Seamlessly routing to ${nextModel}...`);
-        }
+      if (isUpstreamCongestion) {
+        markModelCongested(model, model.startsWith("gemini-4-") ? 90000 : 45000);
+      } else if (isLocalTimeout) {
+        // Short cooldown only so a slow batch prompt doesn't block fast chat requests
+        markModelCongested(model, 15000);
+      }
+
+      const nextModel = candidateModels[modelIdx + 1];
+      if (nextModel) {
+        console.info(`[Gemini Router] Switching from ${model} to ${nextModel} (${elapsedMs}ms)`);
       } else {
-        const nextModel = candidateModels[modelIdx + 1];
-        if (nextModel) {
-          console.info(`[Gemini API] Model ${model} encountered an issue, trying fallback ${nextModel}...`);
-        }
+        lastAiFailureInfo = {
+          model,
+          message: sanitizeErrorSummary(err),
+          at: new Date().toISOString(),
+        };
       }
     }
   }
@@ -168,6 +320,7 @@ app.get("/api/system-status", (req, res) => {
 
   res.json({
     status: "ok",
+    apiVersion: "4.0.0",
     timestamp: new Date().toISOString(),
     uptimeSeconds: Math.floor(process.uptime()),
     nodeVersion: process.version,
@@ -175,81 +328,434 @@ app.get("/api/system-status", (req, res) => {
     aiEngine: {
       hasKey,
       status: hasKey ? "online" : "preset_mode",
-      primaryModel: "gemini-3-flash-preview",
-      fallbackModels: ["gemini-3.1-flash-lite-preview", "gemini-2.5-flash"],
+      primaryModel: "gemini-4-hydrogen",
+      fallbackModels: ["gemini-3.1-flash-lite"],
+      thinkingLevel: "LOW",
       activeCycle: currentCycle,
       cachedCyclesCount: cachedCycles.length,
-      cachedCycles
+      cachedCycles,
+      congestedModelsCount: modelCongestionCooldown.size,
+      lastFailure: lastAiFailureInfo
     },
     speechAudio: {
       presetLessonsCount: PRESET_LESSONS.length,
       audioAcousticEnhancement: "active",
-      engine: "Web Speech API with 2026 Semiconductor Phonetic Booster"
+      neuralTtsModel: "gemini-3.8-flash-lite-tts",
+      engine: "Gemini 3.8 Neural Studio TTS + Web Speech Acoustic Booster",
+      ttsCacheEntries: ttsAudioCache.size,
+      ttsCacheMaxEntries: MAX_TTS_CACHE_ITEMS,
+      lastTtsFailure: lastTtsFailureInfo
     },
     resilience: {
       multiModelFailover: true,
       instantPresetFallback: true,
-      circuitBreaker: true
+      circuitBreaker: true,
+      rateLimiterActive: true,
+      ttsMagicByteValidation: true,
+      pipSanitizerActive: true
     },
     database: fabDatabase.getDatabaseStats()
   });
 });
 
-// High-speed Cloud TTS Audio Stream Proxy with In-Memory Cache for 100% reliable pronunciation fallback
-const ttsAudioCache = new Map<string, Buffer>();
-const MAX_TTS_CACHE_ITEMS = 300;
+// High-speed Cloud Neural TTS Audio Stream with Multi-Chunk Concatenation, In-Memory Cache & Deduplication
+interface CachedTtsEntry {
+  buffer: Buffer;
+  contentType: string;
+  engine: "gemini-3.8-flash-lite-tts" | "legacy-tts";
+}
+const ttsAudioCache = new Map<string, CachedTtsEntry>();
+const ttsInFlightRequests = new Map<string, Promise<CachedTtsEntry | null>>();
+const MAX_TTS_CACHE_ITEMS = 1500;
+const ALLOWED_TTS_VOICES = new Set(["Puck", "Charon", "Kore", "Fenrir", "Zephyr"]);
 
-app.get("/api/tts", async (req, res) => {
+function isValidMpegAudioBuffer(buf: Buffer): boolean {
+  if (!buf || buf.length < 128) return false;
+  // Check for ID3v2 header ('ID3') or MPEG audio frame sync (0xFF + 0xE0 mask)
+  const hasId3 = buf[0] === 0x49 && buf[1] === 0x44 && buf[2] === 0x33;
+  const hasMpegSync = buf[0] === 0xff && (buf[1] & 0xe0) === 0xe0;
+  return hasId3 || hasMpegSync;
+}
+
+function isValidWavAudioBuffer(buf: Buffer): boolean {
+  if (!buf || buf.length < 64) return false;
+  return buf.subarray(0, 4).toString("ascii") === "RIFF" && buf.subarray(8, 12).toString("ascii") === "WAVE";
+}
+
+function splitServerTtsChunks(text: string, maxLen = 165): string[] {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized) return [];
+  if (normalized.length <= maxLen) return [normalized];
+
+  const chunks: string[] = [];
+  let remaining = normalized;
+  while (remaining.length > maxLen) {
+    let splitIdx = -1;
+    for (const sep of [". ", "! ", "? ", "。", "！", "？", "; ", ", ", "，", " "]) {
+      const idx = remaining.lastIndexOf(sep, maxLen);
+      if (idx > Math.floor(maxLen * 0.38)) {
+        splitIdx = idx + sep.length;
+        break;
+      }
+    }
+    if (splitIdx <= 0) splitIdx = maxLen;
+    const piece = remaining.slice(0, splitIdx).trim();
+    if (piece) chunks.push(piece);
+    remaining = remaining.slice(splitIdx).trim();
+  }
+  if (remaining) chunks.push(remaining);
+  return chunks.filter(Boolean);
+}
+
+function stripLeadingId3v2Tag(buf: Buffer): Buffer {
+  if (!buf || buf.length < 10) return buf;
+  if (buf[0] === 0x49 && buf[1] === 0x44 && buf[2] === 0x33) {
+    const flags = buf[5];
+    const footerSize = (flags & 0x10) !== 0 ? 10 : 0;
+    const tagSize =
+      ((buf[6] & 0x7f) << 21) |
+      ((buf[7] & 0x7f) << 14) |
+      ((buf[8] & 0x7f) << 7) |
+      (buf[9] & 0x7f);
+    const totalHeaderBytes = 10 + tagSize + footerSize;
+    if (totalHeaderBytes < buf.length) {
+      return buf.subarray(totalHeaderBytes);
+    }
+  }
+  return buf;
+}
+
+function getMpegFirstFrameLengthAndHeader(buf: Buffer): { frameLen: number; sig: number; isXingOrInfo: boolean } | null {
+  if (!buf || buf.length < 48) return null;
+  if (buf[0] !== 0xff || (buf[1] & 0xe0) !== 0xe0) return null;
+  const versionBits = (buf[1] >> 3) & 0x03; // 3 = MPEG1, 2 = MPEG2, 0 = MPEG2.5
+  const layerBits = (buf[1] >> 1) & 0x03;   // 1 = Layer III
+  const bitrateIdx = (buf[2] >> 4) & 0x0f;
+  const srIdx = (buf[2] >> 2) & 0x03;
+  const padding = (buf[2] >> 1) & 0x01;
+  const channelMode = (buf[3] >> 6) & 0x03;
+  if (versionBits === 1 || layerBits !== 1 || bitrateIdx === 0 || bitrateIdx === 15 || srIdx === 3) {
+    return null;
+  }
+
+  const mpeg1Bitrates = [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0];
+  const mpeg2Bitrates = [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0];
+  const sampleRatesMpeg1 = [44100, 48000, 32000];
+  const sampleRatesMpeg2 = [22050, 24000, 16000];
+  const sampleRatesMpeg25 = [11025, 12000, 8000];
+
+  const isMpeg1 = versionBits === 3;
+  const bitrate = (isMpeg1 ? mpeg1Bitrates[bitrateIdx] : mpeg2Bitrates[bitrateIdx]) * 1000;
+  const sampleRate = isMpeg1
+    ? sampleRatesMpeg1[srIdx]
+    : versionBits === 2
+    ? sampleRatesMpeg2[srIdx]
+    : sampleRatesMpeg25[srIdx];
+  if (!bitrate || !sampleRate) return null;
+
+  const coeff = isMpeg1 ? 144 : 72;
+  const frameLen = Math.floor((coeff * bitrate) / sampleRate) + padding;
+  if (frameLen < 24 || frameLen > buf.length) return null;
+
+  const headerSlice = buf.subarray(0, frameLen);
+  const isXingOrInfo =
+    headerSlice.includes(Buffer.from("Xing")) ||
+    headerSlice.includes(Buffer.from("Info")) ||
+    headerSlice.includes(Buffer.from("LAME"));
+
+  // Signature encodes MPEG version + layer + sample rate + channel mode so concatenated streams stay homogeneous
+  const sig = (versionBits << 10) | (layerBits << 8) | (srIdx << 4) | channelMode;
+  return { frameLen, sig, isXingOrInfo };
+}
+
+function sanitizeMpegChunkForConcat(buf: Buffer, stripId3AndXing: boolean): { buf: Buffer; sig: number | null } {
+  let clean = stripId3AndXing ? stripLeadingId3v2Tag(buf) : buf;
+  const firstFrame = getMpegFirstFrameLengthAndHeader(stripLeadingId3v2Tag(buf));
+  if (stripId3AndXing && firstFrame?.isXingOrInfo && firstFrame.frameLen < clean.length) {
+    clean = clean.subarray(firstFrame.frameLen);
+  }
+  return { buf: clean, sig: firstFrame ? firstFrame.sig : null };
+}
+
+interface UpstreamMpegResult {
+  buffer: Buffer;
+  providerGroup: "google" | "youdao";
+}
+
+async function fetchSingleUpstreamMpegChunk(
+  chunkText: string,
+  tl: string,
+  preferredProvider?: "google" | "youdao"
+): Promise<UpstreamMpegResult | null> {
+  // 統一拉取母語自然標準語速 (ttsspeed=1)，由前端以 preservesPitch=true 進行無變調精準變速，徹底消除雙重降速與變調問題
+  const googleUrls: Array<{ url: string; providerGroup: "google" }> = [
+    {
+      url: `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=${encodeURIComponent(tl)}&ttsspeed=1&q=${encodeURIComponent(chunkText)}`,
+      providerGroup: "google",
+    },
+    {
+      url: `https://translate.googleapis.com/translate_tts?ie=UTF-8&client=gtx&tl=${encodeURIComponent(tl)}&ttsspeed=1&q=${encodeURIComponent(chunkText)}`,
+      providerGroup: "google",
+    },
+  ];
+  const youdaoUrls: Array<{ url: string; providerGroup: "youdao" }> =
+    tl === "en"
+      ? [{ url: `https://dict.youdao.com/dictvoice?type=2&audio=${encodeURIComponent(chunkText)}`, providerGroup: "youdao" }]
+      : [];
+
+  const fallbackUrls =
+    preferredProvider === "google"
+      ? googleUrls
+      : preferredProvider === "youdao"
+      ? youdaoUrls
+      : [...googleUrls, ...youdaoUrls];
+
+  for (const target of fallbackUrls) {
+    const maxAttempts = 2;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const controller = new AbortController();
+      const timeoutMs = attempt === 0 ? 3500 : 4800;
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+      let shouldRetry = false;
+      try {
+        const response = await fetch(target.url, {
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
+            "Referer": "https://translate.google.com/",
+          },
+          signal: controller.signal,
+        });
+        if (!response.ok) {
+          if (response.status === 429 || response.status >= 500 || response.status === 408) {
+            shouldRetry = true;
+          } else {
+            break; // Non-transient 4xx -> try next mirror immediately
+          }
+        } else {
+          const contentType = (response.headers.get("content-type") || "").toLowerCase();
+          if (contentType.includes("text/html") || contentType.includes("application/json")) {
+            break;
+          }
+          const arrayBuffer = await response.arrayBuffer();
+          const buffer = Buffer.from(arrayBuffer);
+          if (isValidMpegAudioBuffer(buffer) || isValidWavAudioBuffer(buffer)) {
+            return { buffer, providerGroup: target.providerGroup };
+          }
+          shouldRetry = true;
+        }
+      } catch {
+        shouldRetry = true;
+      } finally {
+        clearTimeout(timeoutId);
+      }
+
+      if (shouldRetry && attempt < maxAttempts - 1) {
+        const backoffMs = 150 + Math.floor(Math.random() * 140);
+        await new Promise((r) => setTimeout(r, backoffMs));
+      } else {
+        break;
+      }
+    }
+  }
+  return null;
+}
+
+app.get("/api/tts", ttsRateLimiter, async (req, res) => {
   try {
-    const rawText = String(req.query.text || "").trim().slice(0, 200);
+    const rawText = String(req.query.text || "")
+      .replace(/[\x00-\x1F\x7F]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 600);
     const langParam = String(req.query.lang || "en-US").trim();
+    const requestedVoice = String(req.query.voice || "").trim();
     if (!rawText) {
-      return res.status(400).end();
+      return res.status(400).json({ error: "Missing text parameter" });
     }
 
     const tl = langParam.toLowerCase().startsWith("zh") ? "zh-TW" : "en";
-    const cacheKey = `${tl}:${rawText.toLowerCase()}`;
+    const voiceName = ALLOWED_TTS_VOICES.has(requestedVoice)
+      ? requestedVoice
+      : tl === "zh-TW"
+      ? "Zephyr"
+      : "Kore";
+    const cacheKey = `${tl}:${voiceName}:std:${rawText.toLowerCase()}`;
 
     if (ttsAudioCache.has(cacheKey)) {
-      const cachedBuf = ttsAudioCache.get(cacheKey)!;
-      res.setHeader("Content-Type", "audio/mpeg");
+      const cached = ttsAudioCache.get(cacheKey)!;
+      // Refresh LRU recency so hot cleanroom phrases remain cached longest
+      ttsAudioCache.delete(cacheKey);
+      ttsAudioCache.set(cacheKey, cached);
+      res.setHeader("Content-Type", cached.contentType);
+      res.setHeader("Content-Length", String(cached.buffer.length));
+      res.setHeader("Accept-Ranges", "bytes");
       res.setHeader("Cache-Control", "public, max-age=86400");
-      return res.send(cachedBuf);
+      res.setHeader("X-TTS-Cache", "HIT");
+      res.setHeader("X-TTS-Engine", cached.engine);
+      return res.send(cached.buffer);
     }
 
-    const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=${encodeURIComponent(tl)}&q=${encodeURIComponent(rawText)}`;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3500);
+    let fetchPromise = ttsInFlightRequests.get(cacheKey);
+    if (!fetchPromise) {
+      fetchPromise = (async (): Promise<CachedTtsEntry | null> => {
+        try {
+          // 1. Primary Low-Latency Multi-Chunk MPEG Stream (homogeneous provider & Xing/ID3-safe concatenation)
+          const textChunks = splitServerTtsChunks(rawText, 165);
+          if (textChunks.length > 0) {
+            const firstResult = await fetchSingleUpstreamMpegChunk(textChunks[0], tl);
+            if (firstResult && firstResult.buffer.length > 64) {
+              if (textChunks.length === 1) {
+                const isWav = isValidWavAudioBuffer(firstResult.buffer);
+                const entry: CachedTtsEntry = {
+                  buffer: firstResult.buffer,
+                  contentType: isWav ? "audio/wav" : "audio/mpeg",
+                  engine: "legacy-tts",
+                };
+                if (ttsAudioCache.size >= MAX_TTS_CACHE_ITEMS) {
+                  const oldestKey = ttsAudioCache.keys().next().value;
+                  if (oldestKey) ttsAudioCache.delete(oldestKey);
+                }
+                ttsAudioCache.set(cacheKey, entry);
+                return entry;
+              } else {
+                // Multi-chunk: lock to the same providerGroup so MPEG sample rate & channel layout stay 100% uniform
+                const restResults = await Promise.all(
+                  textChunks.slice(1).map((chunk) =>
+                    fetchSingleUpstreamMpegChunk(chunk, tl, firstResult.providerGroup)
+                  )
+                );
+                const allResults = [firstResult, ...restResults];
+                if (allResults.every((r): r is UpstreamMpegResult => Boolean(r && r.buffer.length > 64 && isValidMpegAudioBuffer(r.buffer)))) {
+                  const sanitized = allResults.map((r) => sanitizeMpegChunkForConcat(r.buffer, true));
+                  const firstSig = sanitized[0].sig;
+                  const signaturesMatch = firstSig !== null && sanitized.every((s) => s.sig === firstSig);
+                  if (signaturesMatch) {
+                    const combinedBuffer = Buffer.concat(sanitized.map((s) => s.buf));
+                    const entry: CachedTtsEntry = {
+                      buffer: combinedBuffer,
+                      contentType: "audio/mpeg",
+                      engine: "legacy-tts",
+                    };
+                    if (ttsAudioCache.size >= MAX_TTS_CACHE_ITEMS) {
+                      const oldestKey = ttsAudioCache.keys().next().value;
+                      if (oldestKey) ttsAudioCache.delete(oldestKey);
+                    }
+                    ttsAudioCache.set(cacheKey, entry);
+                    return entry;
+                  }
+                }
+              }
+            }
+          }
 
-    const response = await fetch(ttsUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
-        "Referer": "https://translate.google.com/"
-      },
-      signal: controller.signal
-    });
-    clearTimeout(timeoutId);
+          // 2. Secondary Fallback: Gemini Neural TTS (24kHz WAV) with single transient retry
+          const ai = getGenAIClient();
+          if (ai && !isModelCoolingDown("gemini-3.8-flash-lite-tts")) {
+            let lastErr: any = null;
+            for (let geminiAttempt = 0; geminiAttempt < 2; geminiAttempt++) {
+              try {
+                const ttsResponse = await withTimeout(
+                  ai.models.generateContent({
+                    model: "gemini-3.8-flash-lite-tts",
+                    contents: [
+                      {
+                        role: "user",
+                        parts: [{ text: rawText }],
+                      },
+                    ],
+                    config: {
+                      responseModalities: ["AUDIO"],
+                      speechConfig: {
+                        voiceConfig: {
+                          prebuiltVoiceConfig: { voiceName },
+                        },
+                      },
+                    },
+                  }),
+                  geminiAttempt === 0 ? 6000 : 7500,
+                  "Gemini:gemini-3.8-flash-lite-tts"
+                );
 
-    if (!response.ok) {
-      return res.status(502).end();
+                const audioPart = ttsResponse.candidates?.[0]?.content?.parts?.[0];
+                const base64Audio = audioPart?.inlineData?.data;
+                const inlineMime = String(audioPart?.inlineData?.mimeType || "").toLowerCase();
+                if (base64Audio) {
+                  let wavBuffer = Buffer.from(base64Audio, "base64");
+                  if (!isValidWavAudioBuffer(wavBuffer) && wavBuffer.length >= 64 && (inlineMime.includes("l16") || inlineMime.includes("pcm"))) {
+                    const dataSize = wavBuffer.length;
+                    const header = Buffer.alloc(44);
+                    header.write("RIFF", 0, 4, "ascii");
+                    header.writeUInt32LE(36 + dataSize, 4);
+                    header.write("WAVE", 8, 4, "ascii");
+                    header.write("fmt ", 12, 4, "ascii");
+                    header.writeUInt32LE(16, 16);
+                    header.writeUInt16LE(1, 20);
+                    header.writeUInt16LE(1, 22);
+                    header.writeUInt32LE(24000, 24);
+                    header.writeUInt32LE(48000, 28);
+                    header.writeUInt16LE(2, 32);
+                    header.writeUInt16LE(16, 34);
+                    header.write("data", 36, 4, "ascii");
+                    header.writeUInt32LE(dataSize, 40);
+                    wavBuffer = Buffer.concat([header, wavBuffer]);
+                  }
+                  if (isValidWavAudioBuffer(wavBuffer)) {
+                    modelCongestionCooldown.delete("gemini-3.8-flash-lite-tts");
+                    const entry: CachedTtsEntry = {
+                      buffer: wavBuffer,
+                      contentType: "audio/wav",
+                      engine: "gemini-3.8-flash-lite-tts",
+                    };
+                    if (ttsAudioCache.size >= MAX_TTS_CACHE_ITEMS) {
+                      const oldestKey = ttsAudioCache.keys().next().value;
+                      if (oldestKey) ttsAudioCache.delete(oldestKey);
+                    }
+                    ttsAudioCache.set(cacheKey, entry);
+                    return entry;
+                  }
+                }
+                lastErr = new Error("Empty or invalid Gemini TTS audio payload");
+              } catch (ttsErr: any) {
+                lastErr = ttsErr;
+              }
+              if (geminiAttempt === 0) {
+                await new Promise((r) => setTimeout(r, 250));
+              }
+            }
+            if (lastErr) {
+              lastTtsFailureInfo = {
+                model: "gemini-3.8-flash-lite-tts",
+                message: sanitizeErrorSummary(lastErr),
+                at: new Date().toISOString(),
+              };
+              // 90s 短冷卻窗口，避免單次網路波動導致長達 10 分鐘無法使用備援神經語音
+              markModelCongested("gemini-3.8-flash-lite-tts", 90000);
+            }
+          }
+          return null;
+        } catch {
+          return null;
+        } finally {
+          ttsInFlightRequests.delete(cacheKey);
+        }
+      })();
+      ttsInFlightRequests.set(cacheKey, fetchPromise);
     }
 
-    const arrayBuffer = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-
-    if (buffer.length > 0) {
-      if (ttsAudioCache.size >= MAX_TTS_CACHE_ITEMS) {
-        const oldestKey = ttsAudioCache.keys().next().value;
-        if (oldestKey) ttsAudioCache.delete(oldestKey);
-      }
-      ttsAudioCache.set(cacheKey, buffer);
+    const entry = await fetchPromise;
+    if (!entry || entry.buffer.length === 0) {
+      return res.status(503).json({ error: "TTS upstream temporarily unavailable" });
     }
 
-    res.setHeader("Content-Type", "audio/mpeg");
+    res.setHeader("Content-Type", entry.contentType);
+    res.setHeader("Content-Length", String(entry.buffer.length));
+    res.setHeader("Accept-Ranges", "bytes");
     res.setHeader("Cache-Control", "public, max-age=86400");
-    return res.send(buffer);
-  } catch (err) {
-    return res.status(502).end();
+    res.setHeader("X-TTS-Cache", "MISS");
+    res.setHeader("X-TTS-Engine", entry.engine);
+    return res.send(entry.buffer);
+  } catch {
+    return res.status(503).json({ error: "TTS proxy fallback" });
   }
 });
 
@@ -263,7 +769,7 @@ app.get("/api/sync/status", (req, res) => {
       database: stats
     });
   } catch (err: any) {
-    res.status(500).json({ status: "error", message: err?.message || "Failed to get database stats" });
+    res.status(500).json({ status: "error", message: "Failed to get database stats" });
   }
 });
 
@@ -281,13 +787,26 @@ app.post("/api/sync/push", (req, res) => {
       shiftSettings = {},
       lessonNotes = {},
       vocabNotes = {},
+      noteTimestamps = {},
       flashcardMastered = [],
       importedVocab = [],
       importedLessons = [],
+      srsMemory = {},
+      shadowingScores = {},
+      pronunciationAnalytics,
+      speechSpeed,
+      speechSpeedUpdatedAt,
       speechRecordingsCount = 0,
       completedDrillsCount = 0,
       clientTimestamp = Date.now()
     } = req.body || {};
+
+    if (!isValidProfileUserId(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid userId format. Use 1-64 alphanumeric, underscore, or hyphen characters."
+      });
+    }
 
     const { record, mergedChangesCount } = fabDatabase.upsertUserProfile(userId, {
       bookmarks,
@@ -299,9 +818,15 @@ app.post("/api/sync/push", (req, res) => {
       shiftSettings,
       lessonNotes,
       vocabNotes,
+      noteTimestamps,
       flashcardMastered,
       importedVocab,
       importedLessons,
+      srsMemory,
+      shadowingScores,
+      pronunciationAnalytics,
+      speechSpeed,
+      speechSpeedUpdatedAt,
       speechRecordingsCount,
       completedDrillsCount
     });
@@ -310,7 +835,7 @@ app.post("/api/sync/push", (req, res) => {
       userId,
       type: "push",
       syncedItemsCount: mergedChangesCount,
-      clientTimestamp,
+      clientTimestamp: Number.isFinite(Number(clientTimestamp)) ? Number(clientTimestamp) : Date.now(),
       serverTimestamp: Date.now(),
       status: "success",
       details: `Merged ${mergedChangesCount} updates into revision ${record.revision}`
@@ -324,7 +849,7 @@ app.post("/api/sync/push", (req, res) => {
       record
     });
   } catch (err: any) {
-    res.status(500).json({ success: false, message: err?.message || "Sync push failed" });
+    res.status(500).json({ success: false, message: "Sync push failed" });
   }
 });
 
@@ -332,6 +857,12 @@ app.post("/api/sync/push", (req, res) => {
 app.get("/api/sync/pull/:userId", (req, res) => {
   try {
     const userId = req.params.userId || "default_fse_user";
+    if (!isValidProfileUserId(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid userId format."
+      });
+    }
     const record = fabDatabase.getUserProfile(userId);
     res.json({
       success: true,
@@ -340,7 +871,7 @@ app.get("/api/sync/pull/:userId", (req, res) => {
       record
     });
   } catch (err: any) {
-    res.status(500).json({ success: false, message: err?.message || "Sync pull failed" });
+    res.status(500).json({ success: false, message: "Sync pull failed" });
   }
 });
 
@@ -348,13 +879,14 @@ app.get("/api/sync/pull/:userId", (req, res) => {
 app.post("/api/sync/snapshot", (req, res) => {
   try {
     const backupPath = fabDatabase.createSnapshotBackup();
+    const snapshotId = backupPath ? path.basename(backupPath) : null;
     res.json({
-      success: Boolean(backupPath),
-      backupPath,
+      success: Boolean(snapshotId),
+      snapshotId,
       stats: fabDatabase.getDatabaseStats()
     });
   } catch (err: any) {
-    res.status(500).json({ success: false, message: err?.message || "Snapshot creation failed" });
+    res.status(500).json({ success: false, message: "Snapshot creation failed" });
   }
 });
 
@@ -514,7 +1046,10 @@ ${weaknessStr}
     });
 
     const jsonText = response.text || "";
-    const lessonData = JSON.parse(jsonText);
+    const lessonData = safeParseJson<any>(jsonText, null);
+    if (!lessonData || !lessonData.english_sentence) {
+      throw new Error("Empty or invalid JSON from lesson generator");
+    }
     lessonData.id = "gen-" + Date.now();
     const { lesson: safeLesson } = sanitizeLessonToPublicSafe(lessonData);
     return res.json(safeLesson);
@@ -616,8 +1151,36 @@ ${topicPrompt ? `特定主題或趨勢：${topicPrompt}` : ''}
     });
 
     const jsonText = response.text || "";
-    const articleData = JSON.parse(jsonText);
+    const articleData = safeParseJson<any>(jsonText, null);
+    if (!articleData || !articleData.title) {
+      throw new Error("Empty or invalid JSON from article generator");
+    }
     articleData.id = "art-gen-" + Date.now();
+    articleData.title = sanitizeTextToPublicSafe(articleData.title || "", { stripEnglishParens: true }).text;
+    articleData.summary = sanitizeTextToPublicSafe(articleData.summary || "", { stripEnglishParens: true }).text;
+    if (Array.isArray(articleData.contentSections)) {
+      articleData.contentSections = articleData.contentSections.map((sec: any) => ({
+        ...sec,
+        englishText: sanitizeTextToPublicSafe(sec.englishText || "").text,
+        chineseTranslation: sanitizeTextToPublicSafe(sec.chineseTranslation || "", { stripEnglishParens: true }).text,
+        svoBreakdown: sanitizeTextToPublicSafe(sec.svoBreakdown || "").text,
+      }));
+    }
+    if (Array.isArray(articleData.keyVocab)) {
+      articleData.keyVocab = articleData.keyVocab.map((v: any) => ({
+        ...v,
+        word: sanitizeTextToPublicSafe(v.word || "").text,
+        translation: sanitizeTextToPublicSafe(v.translation || "", { stripEnglishParens: true }).text,
+      }));
+    }
+    if (Array.isArray(articleData.quizQuestions)) {
+      articleData.quizQuestions = articleData.quizQuestions.map((q: any) => ({
+        ...q,
+        question: sanitizeTextToPublicSafe(q.question || "").text,
+        options: Array.isArray(q.options) ? q.options.map((o: string) => sanitizeTextToPublicSafe(o || "").text) : [],
+        explanation: sanitizeTextToPublicSafe(q.explanation || "").text,
+      }));
+    }
     return res.json(articleData);
   } catch (err: any) {
     console.info("[Article Generator] Fallback preset activated due to upstream peak demand.");
@@ -687,7 +1250,14 @@ app.post("/api/generate-remediation", async (req, res) => {
     });
 
     const jsonText = response.text || "";
-    const remData = JSON.parse(jsonText);
+    const remData = safeParseJson<any>(jsonText, null);
+    if (!remData || !Array.isArray(remData.lessons)) {
+      throw new Error("Empty or invalid JSON from remediation generator");
+    }
+    remData.advice = sanitizeTextToPublicSafe(remData.advice || "", { stripEnglishParens: true }).text;
+    if (Array.isArray(remData.lessons)) {
+      remData.lessons = remData.lessons.map((l: any, i: number) => sanitizeLessonToPublicSafe({ id: `rem-${Date.now()}-${i}`, ...l }).lesson);
+    }
     return res.json(remData);
   } catch (err: any) {
     console.info("[Remediation Generator] Using curated remediation card due to upstream capacity.");
@@ -1458,7 +2028,7 @@ app.post("/api/3day-auto-update", async (req, res) => {
     }
 
     // Fast-path protection: if candidate models are cooling down from demand spikes, immediately serve the verified cycle bundle
-    const candidateModels = ["gemini-3-flash-preview", "gemini-3.1-flash-lite-preview", "gemini-2.5-flash"];
+    const candidateModels = ["gemini-4-hydrogen", "gemini-3.1-flash-lite"];
     if (areAllModelsCoolingDown(candidateModels)) {
       console.info(`[3Day-Auto-Update] Upstream models cooling down. Serving verified cycle ${currentCycle} bundle (${selectedTheme.theme}).`);
       const bundle = getFallbackBundle(`已載入第 ${currentCycle} 輪 3 天晶圓特訓更新包（${selectedTheme.theme}）。`);
@@ -1661,15 +2231,21 @@ app.post("/api/3day-auto-update", async (req, res) => {
           required: ["lessons", "goldenQuotes", "articles", "vocab", "emergencyErrorCodeDrills", "hotTerm"]
         }
       }
+    }, "gemini-4-hydrogen", ["gemini-3.1-flash-lite"], {
+      primaryTimeoutMs: 22000,
+      fallbackTimeoutMs: 26000,
     });
 
     const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error("AI generation timeout, fallback to cycle bundle")), 25000)
+      setTimeout(() => reject(new Error("AI generation timeout, fallback to cycle bundle")), 50000)
     );
     const response: any = await Promise.race([generatePromise, timeoutPromise]);
 
     const jsonText = response.text || "";
-    const updateData = JSON.parse(jsonText);
+    const updateData = safeParseJson<any>(jsonText, null);
+    if (!updateData || !Array.isArray(updateData.lessons)) {
+      throw new Error("Empty or invalid JSON from 3day auto-update");
+    }
     const resultBundle = {
       cycleNumber: currentCycle,
       updateTime: nowISO,
@@ -1739,7 +2315,7 @@ app.post("/api/analyze-speech", async (req, res) => {
       }
     });
 
-    const result = JSON.parse(response.text || "{}");
+    const result = safeParseJson(response.text, defaultSpeechAnalysis);
     return res.json(result);
   } catch (err: any) {
     console.info("[Analyze-Speech] Using curated diagnostic profile.");
@@ -1816,7 +2392,7 @@ app.post("/api/error-code-handover", async (req, res) => {
       }
     });
 
-    const result = JSON.parse(response.text || "{}");
+    const result = safeParseJson<any>(response.text, {});
     const safeHandover = {
       ...defaultHandover,
       ...result,
@@ -1924,7 +2500,7 @@ app.post("/api/decompose-sentence", async (req, res) => {
   try {
     const ai = getGenAIClient();
 
-    if (!ai || areAllModelsCoolingDown(["gemini-3-flash-preview", "gemini-3.1-flash-lite-preview", "gemini-2.5-flash"])) {
+    if (!ai || areAllModelsCoolingDown(["gemini-4-hydrogen", "gemini-3.1-flash-lite"])) {
       return res.json(dynamicFallback);
     }
 
@@ -1966,17 +2542,29 @@ app.post("/api/decompose-sentence", async (req, res) => {
       }
     });
 
-    const result = JSON.parse(response.text || "{}");
+    const result = safeParseJson<any>(response.text, {});
+    const rawComp = result?.components || {};
+    const cleanBridge =
+      typeof rawComp.bridge === "string" && !/^(null|undefined|none|n\/a|無|-|—)?$/i.test(rawComp.bridge.trim())
+        ? rawComp.bridge.trim()
+        : undefined;
+    const mergedComponents = {
+      subject: rawComp.subject || dynamicFallback.components.subject,
+      action: rawComp.action || dynamicFallback.components.action,
+      object: rawComp.object || dynamicFallback.components.object,
+      bridge: cleanBridge || dynamicFallback.components.bridge,
+    };
     const merged = {
       ...dynamicFallback,
       ...result,
+      components: mergedComponents,
     };
     const { lesson: safeDecomp } = sanitizeLessonToPublicSafe({
       id: "decomp-" + Date.now(),
       scenario: "AI 拆解句型",
       english_sentence: merged.english_sentence || trimmedSentence,
       chinese_translation: merged.chinese_translation || dynamicFallback.chinese_translation,
-      components: merged.components || dynamicFallback.components,
+      components: merged.components,
       phonetic_taiwan: merged.phonetic_taiwan || dynamicFallback.phonetic_taiwan,
       memory_trick: merged.memory_trick || dynamicFallback.memory_trick
     });
@@ -2418,7 +3006,7 @@ app.post("/api/import-media-english", async (req, res) => {
 
   try {
     const ai = getGenAIClient();
-    const candidateModels = ["gemini-3-flash-preview", "gemini-3.1-flash-lite-preview", "gemini-2.5-flash"];
+    const candidateModels = ["gemini-4-hydrogen", "gemini-3.1-flash-lite"];
 
     // If rawText is provided and no image, or if AI is unavailable, use fast local + AI hybrid
     if (!ai || areAllModelsCoolingDown(candidateModels)) {
@@ -2528,7 +3116,7 @@ ${rawText ? `\n【使用者導入的檔案/文字內容】：\n${rawText.slice(0
       },
     });
 
-    const parsed = JSON.parse(response.text || "{}");
+    const parsed = safeParseJson<any>(response.text, {});
 
     const enrichedVocab = (parsed.extractedWords || []).map((w: any, idx: number) =>
       buildEnrichedSingleSoundWord(w.word, idx, w.exampleSentence, {
@@ -2611,11 +3199,11 @@ ${rawText ? `\n【使用者導入的檔案/文字內容】：\n${rawText.slice(0
 app.post("/api/stress-test", async (req, res) => {
   const startTime = performance.now();
   const iterations = Math.min(Math.max(Number(req.body?.iterations) || 60, 10), 250);
+  const probeUserId = "fse_stress_probe_runner";
 
   try {
     // 1. Database High-Concurrency Read/Write/Merge Stress Test
     const dbStart = performance.now();
-    const probeUserId = "fse_stress_probe_runner";
     let dbSuccessCount = 0;
     for (let i = 0; i < iterations; i++) {
       const { record } = fabDatabase.upsertUserProfile(probeUserId, {
@@ -2660,6 +3248,9 @@ app.post("/api/stress-test", async (req, res) => {
     const phoneticDurationMs = Math.max(0.5, Number((performance.now() - phoneticStart).toFixed(2)));
     const phoneticOpsPerSec = Math.round((phoneticWordsProcessed / phoneticDurationMs) * 1000);
 
+    // Clean up ephemeral stress probe record so real user profile metrics remain accurate
+    fabDatabase.deleteUserProfile(probeUserId);
+
     // 3. Memory & Process Stability Metrics
     const mem = process.memoryUsage();
     const totalDurationMs = Number((performance.now() - startTime).toFixed(2));
@@ -2701,9 +3292,252 @@ app.post("/api/stress-test", async (req, res) => {
       },
     });
   } catch (err: any) {
+    fabDatabase.deleteUserProfile(probeUserId);
     return res.status(500).json({
       success: false,
       error: err?.message || "Stress test encountered an unexpected error",
+    });
+  }
+});
+
+// ============================================================================
+// 國小拆解法句型審計 + Gemini API 台式諧音精簡改寫 + presetLessons 批量持久化
+// ============================================================================
+const PRESET_OVERRIDES_FILE = path.join(process.cwd(), "data", "preset_lessons_overrides.json");
+
+function readServerPresetOverrides(): Record<string, any> {
+  try {
+    if (!fs.existsSync(PRESET_OVERRIDES_FILE)) return {};
+    const raw = fs.readFileSync(PRESET_OVERRIDES_FILE, "utf-8");
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed;
+    }
+  } catch {}
+  return {};
+}
+
+function writeServerPresetOverrides(overrides: Record<string, any>): void {
+  const dir = path.dirname(PRESET_OVERRIDES_FILE);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  fs.writeFileSync(PRESET_OVERRIDES_FILE, JSON.stringify(overrides, null, 2), "utf-8");
+}
+
+app.get("/api/preset-lessons/overrides", (_req, res) => {
+  try {
+    const overrides = readServerPresetOverrides();
+    return res.json({ success: true, overrides, count: Object.keys(overrides).length });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: sanitizeErrorSummary(err) });
+  }
+});
+
+app.post("/api/preset-lessons/batch-update", (req, res) => {
+  try {
+    const { patches } = req.body || {};
+    if (!Array.isArray(patches) || patches.length === 0) {
+      return res.status(400).json({ success: false, error: "請提供至少一筆待更新的教材項目。" });
+    }
+    if (patches.length > 60) {
+      return res.status(400).json({ success: false, error: "單次批量更新上限為 60 筆。" });
+    }
+
+    const current = readServerPresetOverrides();
+    let updatedCount = 0;
+
+    for (const rawPatch of patches) {
+      const id = String(rawPatch?.id || "").trim().slice(0, 80);
+      const englishSentence = String(rawPatch?.english_sentence || "").trim().slice(0, 200);
+      if (!id || !englishSentence) continue;
+
+      const candidateLesson = {
+        id,
+        scenario: String(rawPatch?.scenario || "🎬 情境：晶圓廠實戰精簡句型。").slice(0, 300),
+        english_sentence: englishSentence,
+        chinese_translation: String(rawPatch?.chinese_translation || "").trim().slice(0, 200),
+        components: {
+          subject: String(rawPatch?.components?.subject || "").trim().slice(0, 80),
+          action: String(rawPatch?.components?.action || "").trim().slice(0, 80),
+          object: String(rawPatch?.components?.object || "").trim().slice(0, 100),
+          bridge: String(rawPatch?.components?.bridge || "the (🌉 橋樑)").trim().slice(0, 80),
+        },
+        phonetic_taiwan: String(rawPatch?.phonetic_taiwan || "").trim().slice(0, 240),
+        memory_trick: String(rawPatch?.memory_trick || "").trim().slice(0, 400),
+        additional_context: String(rawPatch?.additional_context || "").trim().slice(0, 240),
+        category: String(rawPatch?.category || "shift-handover").trim().slice(0, 50),
+      };
+
+      const { lesson: safe } = sanitizeLessonToPublicSafe(candidateLesson);
+      current[id] = safe;
+      updatedCount++;
+    }
+
+    writeServerPresetOverrides(current);
+    return res.json({
+      success: true,
+      updatedCount,
+      totalOverrides: Object.keys(current).length,
+      overrides: current,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: sanitizeErrorSummary(err) });
+  }
+});
+
+// POST /api/optimize-lessons-elementary - Gemini API 國小拆解法精簡改寫與台式諧音記憶點生成
+app.post("/api/optimize-lessons-elementary", async (req, res) => {
+  try {
+    const { lessons } = req.body || {};
+    if (!Array.isArray(lessons) || lessons.length === 0) {
+      return res.status(400).json({ error: "請提供待審計優化的教材句型清單。" });
+    }
+
+    const ai = getGenAIClient();
+    if (!ai) {
+      return res.status(503).json({
+        error: "未偵測到 GEMINI_API_KEY，請先於 Settings > Secrets 確認金鑰設定後再執行 Gemini 改寫。",
+      });
+    }
+
+    const batch = lessons.slice(0, 12).map((item: any) => ({
+      id: String(item?.id || "").slice(0, 80),
+      scenario: String(item?.scenario || "").slice(0, 240),
+      english_sentence: String(item?.english_sentence || "").slice(0, 220),
+      chinese_translation: String(item?.chinese_translation || "").slice(0, 160),
+      category: String(item?.category || "general").slice(0, 50),
+      issues: Array.isArray(item?.issues) ? item.issues.slice(0, 5).map((s: any) => String(s)) : [],
+    }));
+
+    const promptText = `你是一位專精「國小拆解法」與「台灣半導體無塵室實戰英語」的首席教材總編。
+以下是一批經自動檢查發現「過長、結構偏複雜、音節負擔重、或台式諧音記憶點不足」的教材句型，請逐一改寫為更精簡、零門檻、秒記秒喊的替換語句。
+
+【嚴格改寫規則】：
+1. **國小拆解法極簡結構**：
+   - 每句英文嚴格控制在 **3 至 5 個英文單字**（最長不超過 5 詞），採用最直覺的單一 SVO 核心（主詞 S + 動詞 V + 冠詞/橋樑 + 受詞 O），**禁止任何複合子句、逗號或冗長介系詞片語**。
+   - 保留原句的核心晶圓廠維修情境與專業意義，必要時將拗口多音節難字改為現場更俐落好唸的同義工程字（如把過長詞組精煉為短句）。
+2. **頂級台式諧音記憶點**：
+   - \`phonetic_taiwan\` 必須使用格式 \`【 詞1 ｜ 詞2 ｜ 詞3 ｜ 詞4 】\`，精準貼合台灣人朗讀英文的連音節奏，不可漏音或硬湊錯音。
+   - \`memory_trick\` 必須結合 **超有畫面感的台灣日常梗／無塵室場景** 與諧音字（用「」標示諧音關鍵字），讓工程師看一次就笑出來且終身不忘！
+   - \`taiwanMnemonicHighlight\` 用 15 字內精煉點出這句最強的台式諧音記憶金句。
+3. **國小積木欄位完整性**：
+   - \`components.subject\` 格式如 \`I (👤 我)\`
+   - \`components.action\` 格式如 \`check (🏃‍♂️ 檢查)\`
+   - \`components.object\` 格式如 \`the valve (📦 閥門)\`
+   - \`components.bridge\` 格式如 \`the (🌉 橋樑)\`
+4. **公版去識別化規範**：不出現特定晶圓廠企業名稱或機密參數。
+
+待優化教材清單（JSON）：
+${JSON.stringify(batch, null, 2)}
+`;
+
+    const response = await generateContentWithRetry(
+      ai,
+      {
+        contents: promptText,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              suggestions: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    lessonId: { type: Type.STRING, description: "對應原教材的 id" },
+                    originalSentence: { type: Type.STRING, description: "原本的英文句子" },
+                    simplifiedSentence: { type: Type.STRING, description: "改寫後 3-5 詞國小拆解極簡英文句" },
+                    chinese_translation: { type: Type.STRING, description: "對應的精準繁體中文翻譯" },
+                    components: {
+                      type: Type.OBJECT,
+                      properties: {
+                        subject: { type: Type.STRING },
+                        action: { type: Type.STRING },
+                        object: { type: Type.STRING },
+                        bridge: { type: Type.STRING },
+                      },
+                      required: ["subject", "action", "object", "bridge"],
+                    },
+                    phonetic_taiwan: { type: Type.STRING, description: "精準台味連讀諧音 【 ... ｜ ... 】" },
+                    memory_trick: { type: Type.STRING, description: "結合諧音與台灣／無塵室畫面的超強記憶點" },
+                    additional_context: { type: Type.STRING, description: "精簡句型結構公式，例如 極簡 4 字句：..." },
+                    improvementReason: { type: Type.STRING, description: "說明如何精簡句構並降低發音負擔" },
+                    taiwanMnemonicHighlight: { type: Type.STRING, description: "15字內台式諧音爆點摘要" },
+                  },
+                  required: [
+                    "lessonId",
+                    "originalSentence",
+                    "simplifiedSentence",
+                    "chinese_translation",
+                    "components",
+                    "phonetic_taiwan",
+                    "memory_trick",
+                    "additional_context",
+                    "improvementReason",
+                    "taiwanMnemonicHighlight",
+                  ],
+                },
+              },
+            },
+            required: ["suggestions"],
+          },
+        },
+      },
+      "gemini-4-hydrogen",
+      ["gemini-3.1-flash-lite"],
+      { primaryTimeoutMs: 25000, fallbackTimeoutMs: 25000 }
+    );
+
+    const parsed = safeParseJson<{ suggestions?: any[] }>(response.text || "", { suggestions: [] });
+    const rawSuggestions = Array.isArray(parsed?.suggestions) ? parsed.suggestions : [];
+    if (rawSuggestions.length === 0) {
+      return res.status(502).json({
+        error: "Gemini API 回傳格式不完整，請稍後再試一次。",
+      });
+    }
+
+    const sanitizedSuggestions = rawSuggestions.map((s: any) => {
+      const { lesson: safe } = sanitizeLessonToPublicSafe({
+        id: String(s.lessonId || ""),
+        scenario: "",
+        english_sentence: String(s.simplifiedSentence || "").trim(),
+        chinese_translation: String(s.chinese_translation || "").trim(),
+        components: s.components || { subject: "", action: "", object: "", bridge: "the (🌉 橋樑)" },
+        phonetic_taiwan: String(s.phonetic_taiwan || "").trim(),
+        memory_trick: String(s.memory_trick || "").trim(),
+        additional_context: String(s.additional_context || "").trim(),
+      });
+      return {
+        lessonId: String(s.lessonId || ""),
+        originalSentence: String(s.originalSentence || ""),
+        simplifiedSentence: safe.english_sentence,
+        chinese_translation: safe.chinese_translation,
+        components: {
+          subject: safe.components.subject,
+          action: safe.components.action,
+          object: safe.components.object,
+          bridge: safe.components.bridge || "the (🌉 橋樑)",
+        },
+        phonetic_taiwan: safe.phonetic_taiwan,
+        memory_trick: safe.memory_trick,
+        additional_context: safe.additional_context || "",
+        improvementReason: sanitizeTextToPublicSafe(String(s.improvementReason || "")).text,
+        taiwanMnemonicHighlight: sanitizeTextToPublicSafe(String(s.taiwanMnemonicHighlight || "")).text,
+      };
+    });
+
+    return res.json({
+      success: true,
+      modelUsed: "gemini-4-hydrogen",
+      suggestions: sanitizedSuggestions,
+    });
+  } catch (err: any) {
+    const summary = sanitizeErrorSummary(err);
+    console.error("[Optimize Lessons Elementary] Gemini API error:", summary);
+    return res.status(502).json({
+      error: `Gemini API 句型優化暫時無法完成：${summary}`,
     });
   }
 });
@@ -2731,39 +3565,185 @@ app.post("/api/chat", async (req, res) => {
 4. 簡潔直觀，用繁體中文回答，口吻熱情親切、專業實用。
 `;
 
-    const chatMessages = (messages || []).map((m: any) => `${m.role === 'user' ? 'User' : 'Tutor'}: ${m.content}`).join('\n');
-    const prompt = `${chatMessages}\nUser: ${userQuestion || '請介紹一下 FSE 無塵室最常見的三句實用英文！'}\nTutor:`;
+    const recentMessages = Array.isArray(messages) ? messages.slice(-8) : [];
+    const chatMessages = recentMessages
+      .map((m: any) => `${m?.role === 'user' ? 'User' : 'Tutor'}: ${String(m?.content || '').slice(0, 1500)}`)
+      .join('\n');
+    const safeQuestion = String(userQuestion || '請介紹一下 FSE 無塵室最常見的三句實用英文！').slice(0, 2000);
+    const prompt = `${chatMessages}\nUser: ${safeQuestion}\nTutor:`;
 
     const response = await generateContentWithRetry(ai, {
       contents: prompt,
       config: {
-        systemInstruction,
-        temperature: 0.7
+        systemInstruction
       }
     });
 
-    res.json({ reply: response.text || defaultReply });
+    const safeReply = sanitizeTextToPublicSafe(response.text || defaultReply).text;
+    res.json({ reply: safeReply });
   } catch (err: any) {
     console.info("[Chat] Using curated fallback reply.");
     res.json({ reply: defaultReply });
   }
 });
 
+// POST /api/chat-stream - Real-Time SSE Streaming AI Tutor Coach
+app.post("/api/chat-stream", async (req, res) => {
+  const { messages, userQuestion } = req.body || {};
+  const defaultReply = "我是 FSE 晶圓級英文導師！記住無塵室核心法則：先抓『主角 (S)』加『動作 (V)』，例如「We replace the valve.（我們更換閥門）」，溝通迅速又精準！";
+
+  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders?.();
+
+  let clientDisconnected = false;
+  req.on("close", () => {
+    clientDisconnected = true;
+  });
+
+  const sendEvent = (payload: Record<string, any>) => {
+    if (!clientDisconnected && !res.writableEnded) {
+      res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    }
+  };
+
+  try {
+    const ai = getGenAIClient();
+    if (!ai) {
+      sendEvent({ delta: defaultReply });
+      sendEvent({ done: true, sanitizedFull: defaultReply });
+      return res.end();
+    }
+
+    const systemInstruction = `你是一位專為「零基礎/初學者」與「半導體設備與製程工程師」量身打造的專業英文教學導師。
+
+教學風格：
+1. 國小拆解法：句子拆解為 👤 主角 (S)、🏃‍♂️ 動作 (V)、📦 東西 (O)、🌉 橋樑 (bridge)。
+2. 頂級擬真台味諧音：【 諧-音 】親切生動，並支援 KK音標 標註。
+3. 記憶點與故事情境：無塵室、機台維修、PM 保養、Error Code 排除等通用公開工程情境（遵守半導體資安去識別化規範，不提及特定企業或客戶機密參數）。
+4. 簡潔直觀，用繁體中文回答，提供清楚可朗讀的英文短句並加上雙引號（如 "We replace the valve."）。`;
+
+    const recentMessages = Array.isArray(messages) ? messages.slice(-8) : [];
+    const chatMessages = recentMessages
+      .map((m: any) => `${m?.role === "user" ? "User" : "Tutor"}: ${String(m?.content || "").slice(0, 1500)}`)
+      .join("\n");
+    const safeQuestion = String(userQuestion || "請介紹一下 FSE 無塵室最常見的三句實用英文！").slice(0, 2000);
+    const prompt = `${chatMessages}\nUser: ${safeQuestion}\nTutor:`;
+
+    const allCandidates = ["gemini-4-hydrogen", "gemini-3.1-flash-lite"];
+    const candidateModels = allCandidates.sort((a, b) => (isModelCoolingDown(a) ? 1 : 0) - (isModelCoolingDown(b) ? 1 : 0));
+
+    let fullText = "";
+    let streamedOk = false;
+
+    for (let idx = 0; idx < candidateModels.length; idx++) {
+      if (clientDisconnected) break;
+      const model = candidateModels[idx];
+      if (isModelCoolingDown(model) && candidateModels.some((m) => !isModelCoolingDown(m))) {
+        continue;
+      }
+      const config: any = { systemInstruction };
+      if (model.startsWith("gemini-4-")) {
+        config.thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
+      }
+
+      const attemptStart = Date.now();
+      try {
+        const stream = await withTimeout(
+          ai.models.generateContentStream({
+            model,
+            contents: prompt,
+            config,
+          }),
+          idx < candidateModels.length - 1 ? 10000 : 16000,
+          `GeminiStream:${model}`
+        );
+
+        for await (const chunk of stream) {
+          if (clientDisconnected) break;
+          const piece = chunk?.text;
+          if (piece) {
+            fullText += piece;
+            sendEvent({ delta: piece });
+          }
+        }
+        if (fullText.trim()) {
+          modelCongestionCooldown.delete(model);
+          lastAiFailureInfo = null;
+          streamedOk = true;
+          break;
+        }
+      } catch (streamErr: any) {
+        const msg = sanitizeErrorSummary(streamErr);
+        const elapsedMs = Date.now() - attemptStart;
+        const msgLower = msg.toLowerCase();
+        const isCongestion =
+          msgLower.includes("503") ||
+          msgLower.includes("429") ||
+          msgLower.includes("unavailable") ||
+          msgLower.includes("high demand");
+        const isTimeout = msgLower.includes("timed out");
+        if (isCongestion) {
+          markModelCongested(model, model.startsWith("gemini-4-") ? 90000 : 45000);
+        } else if (isTimeout) {
+          markModelCongested(model, 15000);
+        }
+        if (fullText.trim()) {
+          lastAiFailureInfo = null;
+          streamedOk = true;
+          break;
+        }
+        const nextModel = candidateModels[idx + 1];
+        if (nextModel) {
+          console.info(`[Gemini Router] Switching stream from ${model} to ${nextModel} (${elapsedMs}ms)`);
+        } else {
+          lastAiFailureInfo = { model, message: msg, at: new Date().toISOString() };
+        }
+      }
+    }
+
+    if (clientDisconnected) {
+      if (!res.writableEnded) res.end();
+      return;
+    }
+
+    if (!streamedOk || !fullText.trim()) {
+      sendEvent({ delta: defaultReply });
+      sendEvent({ done: true, sanitizedFull: defaultReply });
+      return res.end();
+    }
+
+    const sanitizedFull = sanitizeTextToPublicSafe(fullText).text || fullText;
+    sendEvent({ done: true, sanitizedFull });
+    return res.end();
+  } catch {
+    sendEvent({ delta: defaultReply });
+    sendEvent({ done: true, sanitizedFull: defaultReply });
+    return res.end();
+  }
+});
+
 // Global Express Error-Handling Middleware
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  console.error(`[Server Protected Error] ${req.method} ${req.url}:`, err?.message || err);
+  console.error(`[Server Protected Error] ${req.method} ${req.url}:`, sanitizeErrorSummary(err));
   if (res.headersSent) {
     return next(err);
   }
   res.status(500).json({
     error: "Internal Server Protected Error",
-    message: err?.message || "An unexpected error occurred; system handled gracefully.",
+    message: "An unexpected error occurred; system handled gracefully.",
     timestamp: new Date().toISOString()
   });
 });
 
-// Graceful shutdown with database persistence flush
+// Graceful shutdown with database persistence flush & HTTP server close
+let activeHttpServer: ReturnType<typeof app.listen> | null = null;
+let isShuttingDown = false;
+
 const handleGracefulShutdown = async (signal: string) => {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
   console.log(`[Server Guard] Received ${signal}. Flushing database state before exit...`);
   try {
     fabDatabase.flushToDisk();
@@ -2771,11 +3751,24 @@ const handleGracefulShutdown = async (signal: string) => {
   } catch (e) {
     console.error("[Server Guard] Error flushing database on shutdown:", e);
   }
-  process.exit(0);
+  if (activeHttpServer) {
+    const forceTimer = setTimeout(() => process.exit(0), 2000);
+    if (typeof forceTimer.unref === "function") forceTimer.unref();
+    activeHttpServer.close(() => {
+      process.exit(0);
+    });
+  } else {
+    process.exit(0);
+  }
 };
 
 process.on("SIGTERM", () => handleGracefulShutdown("SIGTERM"));
 process.on("SIGINT", () => handleGracefulShutdown("SIGINT"));
+process.on("beforeExit", () => {
+  try {
+    fabDatabase.flushToDisk();
+  } catch {}
+});
 
 // Start server immediately on port 3000 so health/readiness probes succeed without waiting for Vite cold init
 async function startServer() {
@@ -2818,13 +3811,29 @@ async function startServer() {
     });
   } else {
     const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
+    app.use(
+      "/assets",
+      express.static(path.join(distPath, "assets"), {
+        maxAge: "30d",
+        immutable: true,
+      })
+    );
+    app.use(
+      express.static(distPath, {
+        setHeaders: (res, filePath) => {
+          if (filePath.endsWith(".html")) {
+            res.setHeader("Cache-Control", "no-cache");
+          }
+        },
+      })
+    );
     app.get("*", (req, res) => {
+      res.setHeader("Cache-Control", "no-cache");
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  activeHttpServer = app.listen(PORT, "0.0.0.0", () => {
     console.log(`[FSE English Tutor] Server listening on http://0.0.0.0:${PORT}`);
   });
 }

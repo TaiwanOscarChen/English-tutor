@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Keyboard,
@@ -28,6 +28,18 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({
   onOpenBackupModal,
   onOpenSystemHealth
 }) => {
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const shortcutGroups = [
@@ -36,14 +48,17 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({
       items: [
         { key: '1', desc: '每日句型特訓' },
         { key: '2', desc: 'AI 口語跟讀評測' },
-        { key: '3', desc: '五大製程設備專區（曝光／蝕刻／薄膜／量測／光學檢測）' },
-        { key: '4', desc: '晶圓知識庫（單字／文章／急救／情境）' },
+        { key: '3', desc: '通勤／巡檢語音隨身聽 (Drive Mode)' },
+        { key: '4', desc: '五大製程設備專區（曝光／蝕刻／薄膜／量測／光學檢測）' },
+        { key: '5', desc: '晶圓知識庫（單字／文章／急救／情境／診斷）' },
         { key: '← / →', desc: '每日句型：極速切換上一關 / 下一關' },
       ]
     },
     {
-      group: '全域指令與系統工具',
+      group: '語音實測與全域指令',
       items: [
+        { key: 'P', desc: '立即開啟當前句型「口說實測與即時頻譜計量」' },
+        { key: 'R', desc: '立即重聽當前畫面英文句型標準發音' },
         { key: '⌘ K / Ctrl+K', desc: '開啟全站指令快搜 (Command Palette)' },
         { key: 'Space 空白鍵', desc: '播放 / 暫停 當前焦點句型發音' },
         { key: 'M', desc: '切換 UI 音效開啟 / 靜音' },
@@ -65,6 +80,9 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({
     <AnimatePresence>
       <div
         id="keyboard-shortcuts-modal-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-label="鍵盤操作快捷鍵指南"
         className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-md"
         onClick={onClose}
       >
@@ -97,11 +115,13 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({
             </div>
 
             <button
+              type="button"
+              aria-label="關閉快捷鍵指南"
               onClick={() => {
                 playClickSound();
                 onClose();
               }}
-              className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
+              className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
             >
               <X className="w-4 h-4" />
             </button>
@@ -111,9 +131,8 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({
           <div className="space-y-4 pt-4">
             {shortcutGroups.map((grp, gIdx) => (
               <div key={gIdx} className="space-y-2">
-                <h4 className="text-xs font-bold text-slate-400 font-mono flex items-center gap-1.5 uppercase tracking-wider">
-                  <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
-                  <span>{grp.group}</span>
+                <h4 className="text-xs font-bold text-slate-400 font-mono uppercase tracking-wider">
+                  {grp.group}
                 </h4>
 
                 <div className="bg-slate-950/80 rounded-2xl border border-slate-800/80 divide-y divide-slate-800/60 overflow-hidden">
@@ -138,24 +157,26 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({
             <div className="flex items-center gap-1.5 flex-wrap">
               {onOpenSystemHealth && (
                 <button
+                  type="button"
                   onClick={() => {
                     playClickSound();
                     onClose();
                     onOpenSystemHealth();
                   }}
-                  className="px-2.5 py-1 rounded-lg bg-emerald-950/80 hover:bg-emerald-900/80 text-emerald-300 border border-emerald-500/30 text-[11px] font-bold transition-all cursor-pointer"
+                  className="px-2.5 py-1 rounded-lg bg-emerald-950/80 hover:bg-emerald-900/80 text-emerald-300 border border-emerald-500/30 text-[11px] font-bold transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
                 >
                   ⚡ 全系統強化監控
                 </button>
               )}
               {onOpenBackupModal && (
                 <button
+                  type="button"
                   onClick={() => {
                     playClickSound();
                     onClose();
                     onOpenBackupModal();
                   }}
-                  className="px-2.5 py-1 rounded-lg bg-cyan-950/80 hover:bg-cyan-900/80 text-cyan-300 border border-cyan-500/30 text-[11px] font-bold transition-all cursor-pointer"
+                  className="px-2.5 py-1 rounded-lg bg-cyan-950/80 hover:bg-cyan-900/80 text-cyan-300 border border-cyan-500/30 text-[11px] font-bold transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
                 >
                   💾 數據備份
                 </button>
@@ -164,11 +185,12 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({
             <div className="flex items-center gap-2 ml-auto">
               <span>隨時按 <kbd className="px-1.5 py-0.5 rounded bg-slate-800 text-amber-300 font-mono font-bold">?</kbd> 開啟指南</span>
               <button
+                type="button"
                 onClick={() => {
                   playClickSound();
                   onClose();
                 }}
-                className="px-3 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs transition-colors cursor-pointer"
+                className="px-3 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
               >
                 我知道了
               </button>

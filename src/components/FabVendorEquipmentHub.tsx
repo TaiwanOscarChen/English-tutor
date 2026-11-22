@@ -1,24 +1,16 @@
-import React, { useState } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import { 
-  Cpu, 
-  Layers, 
-  Wrench, 
-  AlertTriangle, 
-  Volume2, 
-  CheckCircle2, 
-  ExternalLink, 
-  Radio, 
-  Zap, 
-  PhoneCall, 
-  FileText,
-  ShieldCheck,
-  Flame,
-  Search,
+import React, { useState, useRef, useEffect } from 'react';
+import {
+  Cpu,
+  AlertTriangle,
+  Volume2,
+  Zap,
+  PhoneCall,
   Play,
   Square,
   Copy,
-  Check
+  Check,
+  ChevronDown,
+  CheckCircle2
 } from 'lucide-react';
 import { speakEnglish, cancelSpeech } from '../utils/speech';
 import { playClickSound } from '../utils/audioEffects';
@@ -288,56 +280,134 @@ export const FabVendorEquipmentHub: React.FC = () => {
   const [isPlayingAll, setIsPlayingAll] = useState<boolean>(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [expandedBreakdownKey, setExpandedBreakdownKey] = useState<string | null>(null);
+  const [showDialogues, setShowDialogues] = useState<boolean>(true);
+  const [showAlarms, setShowAlarms] = useState<boolean>(true);
+  const [showTerms, setShowTerms] = useState<boolean>(false);
+
+  const playAllSessionRef = useRef<number>(0);
+  const playAllTimerRef = useRef<number | null>(null);
+  const isStartingSpeechRef = useRef<boolean>(false);
+  const copyTimerRef = useRef<number | null>(null);
 
   const currentVendor = EQUIPMENT_DATA.find(v => v.id === activeVendorId) || EQUIPMENT_DATA[0];
 
-  const handleSpeakLine = (text: string, idx: number) => {
-    playClickSound();
-    cancelSpeech();
+  const stopPlayAllSession = () => {
+    playAllSessionRef.current += 1;
+    if (playAllTimerRef.current !== null) {
+      window.clearTimeout(playAllTimerRef.current);
+      playAllTimerRef.current = null;
+    }
     setIsPlayingAll(false);
-    setPlayingLineIdx(idx);
-    speakEnglish(text, 0.85, () => {
+    setPlayingLineIdx(null);
+  };
+
+  useEffect(() => {
+    const handleSpeechInterrupted = () => {
+      if (isStartingSpeechRef.current) return;
+      playAllSessionRef.current += 1;
+      if (playAllTimerRef.current !== null) {
+        window.clearTimeout(playAllTimerRef.current);
+        playAllTimerRef.current = null;
+      }
+      setIsPlayingAll(false);
       setPlayingLineIdx(null);
-    });
+    };
+    window.addEventListener('fse-speech-interrupted', handleSpeechInterrupted);
+    return () => {
+      window.removeEventListener('fse-speech-interrupted', handleSpeechInterrupted);
+      playAllSessionRef.current += 1;
+      if (playAllTimerRef.current !== null) {
+        window.clearTimeout(playAllTimerRef.current);
+      }
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+      cancelSpeech();
+    };
+  }, []);
+
+  const handleSpeakLine = (text: string, idx: number, speed: number = 0.85) => {
+    playClickSound();
+    isStartingSpeechRef.current = true;
+    try {
+      stopPlayAllSession();
+      cancelSpeech();
+      setPlayingLineIdx(idx);
+      speakEnglish(
+        text,
+        speed,
+        () => {
+          setPlayingLineIdx((prev) => (prev === idx ? null : prev));
+        },
+        undefined,
+        100,
+        false
+      );
+    } finally {
+      isStartingSpeechRef.current = false;
+    }
   };
 
   const handleTogglePlayAllDialogue = () => {
     playClickSound();
     if (isPlayingAll) {
+      stopPlayAllSession();
       cancelSpeech();
-      setIsPlayingAll(false);
-      setPlayingLineIdx(null);
       return;
     }
 
     const dialogues = currentVendor.tacDialogues;
     if (!dialogues || dialogues.length === 0) return;
 
-    setIsPlayingAll(true);
-    let idx = 0;
+    isStartingSpeechRef.current = true;
+    try {
+      stopPlayAllSession();
+      cancelSpeech();
 
-    const speakNext = () => {
-      if (idx >= dialogues.length) {
-        setIsPlayingAll(false);
-        setPlayingLineIdx(null);
-        return;
-      }
-      setPlayingLineIdx(idx);
-      speakEnglish(dialogues[idx].english, 0.85, () => {
-        idx++;
-        setTimeout(speakNext, 450);
-      });
-    };
+      const sessionId = ++playAllSessionRef.current;
+      setIsPlayingAll(true);
+      let idx = 0;
 
-    speakNext();
+      const speakNext = () => {
+        if (playAllSessionRef.current !== sessionId) return;
+        if (idx >= dialogues.length) {
+          setIsPlayingAll(false);
+          setPlayingLineIdx(null);
+          return;
+        }
+        setPlayingLineIdx(idx);
+        isStartingSpeechRef.current = true;
+        try {
+          speakEnglish(dialogues[idx].english, 0.85, () => {
+            if (playAllSessionRef.current !== sessionId) return;
+            idx++;
+            playAllTimerRef.current = window.setTimeout(() => {
+              playAllTimerRef.current = null;
+              speakNext();
+            }, 420);
+          });
+        } finally {
+          isStartingSpeechRef.current = false;
+        }
+      };
+
+      speakNext();
+    } finally {
+      isStartingSpeechRef.current = false;
+    }
   };
 
   const handleCopyText = (text: string, key: string) => {
     playClickSound();
     try {
-      navigator.clipboard.writeText(text);
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        navigator.clipboard.writeText(text).catch(() => {});
+      }
       setCopiedKey(key);
-      setTimeout(() => setCopiedKey(null), 1800);
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+      copyTimerRef.current = window.setTimeout(() => setCopiedKey(null), 1800);
     } catch {}
   };
 
@@ -349,7 +419,7 @@ export const FabVendorEquipmentHub: React.FC = () => {
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
-              <span className="px-2 py-0.5 rounded-full bg-cyan-500/20 border border-cyan-400/40 text-cyan-300 font-mono text-[10px] font-bold flex items-center gap-1">
+              <span className="px-2 py-0.5 rounded-md bg-cyan-500/20 border border-cyan-400/40 text-cyan-300 font-mono text-[10px] font-bold flex items-center gap-1">
                 <Cpu className="w-3 h-3 text-cyan-400" />
                 <span>五大核心設備</span>
               </span>
@@ -368,25 +438,27 @@ export const FabVendorEquipmentHub: React.FC = () => {
           return (
             <button
               key={vendor.id}
+              type="button"
+              aria-pressed={isSelected}
               onClick={() => {
                 playClickSound();
+                stopPlayAllSession();
                 cancelSpeech();
-                setIsPlayingAll(false);
-                setPlayingLineIdx(null);
+                setExpandedBreakdownKey(null);
                 setActiveVendorId(vendor.id);
               }}
-              className={`p-3 rounded-2xl text-left border transition-all cursor-pointer relative overflow-hidden ${
+              className={`p-3 rounded-2xl text-left border transition-all cursor-pointer relative overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
                 isSelected
                   ? 'bg-slate-900 border-cyan-400 shadow-lg shadow-cyan-500/20 ring-1 ring-cyan-300'
                   : 'bg-slate-950/70 hover:bg-slate-900/80 border-slate-800 text-slate-400 hover:text-slate-200'
               }`}
             >
               <div className="flex items-center justify-between">
-                <span className={`text-[10px] font-mono font-bold px-1.5 py-0.2 rounded border ${vendor.badgeColor}`}>
+                <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border ${vendor.badgeColor}`}>
                   {vendor.badgeCode}
                 </span>
                 {isSelected && (
-                  <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
+                  <CheckCircle2 className="w-3.5 h-3.5 text-cyan-400 shrink-0" aria-hidden="true" />
                 )}
               </div>
               <div className="mt-2 text-xs sm:text-sm font-black font-mono text-white break-words leading-snug">
@@ -401,7 +473,7 @@ export const FabVendorEquipmentHub: React.FC = () => {
       </div>
 
       {/* Active System Details Console */}
-      <div className="bg-slate-900/95 border border-slate-800/90 rounded-2xl p-4 sm:p-5 shadow-2xl space-y-4">
+      <div className="bg-slate-900/95 border border-slate-800/90 rounded-2xl p-4 sm:p-5 shadow-2xl space-y-3.5">
         
         {/* System Header Info */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between pb-3 border-b border-slate-800 gap-2">
@@ -414,8 +486,8 @@ export const FabVendorEquipmentHub: React.FC = () => {
                 / {currentVendor.category}
               </span>
             </div>
-            <div className="text-xs text-amber-300 font-mono mt-0.5 flex items-center gap-1.5">
-              <span className="text-slate-400">通用系統架構：</span>
+            <div className="text-xs text-amber-300 font-mono mt-0.5">
+              <span className="text-slate-400">架構：</span>
               <span className="font-bold">{currentVendor.flagshipTool}</span>
             </div>
           </div>
@@ -424,324 +496,405 @@ export const FabVendorEquipmentHub: React.FC = () => {
           </p>
         </div>
 
-        {/* Section 1: Technical Support Simulation */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <h4 className="text-xs font-mono font-bold text-slate-200 flex items-center gap-1.5">
-              <PhoneCall className="w-3.5 h-3.5 text-cyan-400" />
-              <span>技術支援極簡對話</span>
-            </h4>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={handleTogglePlayAllDialogue}
-                className={`px-3 py-1 rounded-xl text-xs font-mono font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-95 ${
-                  isPlayingAll
-                    ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 animate-pulse'
-                    : 'bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 border border-cyan-400/30'
-                }`}
-              >
-                {isPlayingAll ? <Square className="w-3 h-3 fill-current" /> : <Play className="w-3 h-3 fill-current" />}
-                <span>{isPlayingAll ? '停止' : '連播對話'}</span>
-              </button>
-            </div>
+        {/* Section 1: Collapsible Technical Support Simulation */}
+        <div className="border border-slate-800 rounded-xl bg-slate-950/50 overflow-hidden">
+          <div className="px-3 py-2.5 flex items-center justify-between gap-2 bg-slate-900/40">
+            <button
+              type="button"
+              aria-expanded={showDialogues}
+              onClick={() => {
+                playClickSound();
+                setShowDialogues((prev) => !prev);
+              }}
+              className="flex items-center gap-2 text-xs font-mono font-bold text-slate-200 cursor-pointer flex-1 text-left tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 rounded-lg"
+            >
+              <PhoneCall className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+              <span>技術支援極簡對話（{currentVendor.tacDialogues.length} 句）</span>
+              <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${showDialogues ? 'rotate-180' : ''}`} />
+            </button>
+
+            <button
+              type="button"
+              onClick={handleTogglePlayAllDialogue}
+              className={`px-3 py-1 rounded-xl text-xs font-mono font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-95 shrink-0 whitespace-nowrap ${
+                isPlayingAll
+                  ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                  : 'bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 border border-cyan-400/30'
+              }`}
+            >
+              {isPlayingAll ? <Square className="w-3 h-3 fill-current" /> : <Play className="w-3 h-3 fill-current" />}
+              <span>{isPlayingAll ? '停止' : '連播對話'}</span>
+            </button>
           </div>
 
-          <div className="bg-slate-950/80 rounded-xl border border-slate-800/90 p-3 space-y-2.5">
-            {currentVendor.tacDialogues.map((dlg, dIdx) => {
-              const copyKey = `dlg-${activeVendorId}-${dIdx}`;
-              const breakdownKey = `dlg-bd-${activeVendorId}-${dIdx}`;
-              const isCopied = copiedKey === copyKey;
-              const isExpanded = expandedBreakdownKey === breakdownKey;
-              const dlgKK = getSentenceKKPhonetic(dlg.english);
-              const dlgHomophone = getMandarinPhoneticFromSentence(dlg.english)
-                .replace(/^【\s*|\s*】$/g, '')
-                .trim();
-              const dlgZhuyin = convertPhoneticToZhuyin(dlgHomophone)
-                .replace(/^【\s*|\s*】$/g, '')
-                .trim();
-              return (
-                <div 
-                  key={dIdx} 
-                  className={`p-3 rounded-xl border transition-all space-y-1.5 ${
-                    playingLineIdx === dIdx
-                      ? 'bg-cyan-950/40 border-cyan-400 ring-1 ring-cyan-400/50'
-                      : dlg.speaker === 'FSE'
-                      ? 'bg-slate-900/80 border-cyan-500/30'
-                      : 'bg-indigo-950/30 border-indigo-500/30'
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${
-                      dlg.speaker === 'FSE'
-                        ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
-                        : 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
-                    }`}>
-                      {dlg.speaker === 'FSE' ? 'FSE 工程師' : '設備技術專家'}
-                    </span>
+          {showDialogues && (
+            <div className="p-3 border-t border-slate-800/80 space-y-2.5">
+              {currentVendor.tacDialogues.map((dlg, dIdx) => {
+                const copyKey = `dlg-${activeVendorId}-${dIdx}`;
+                const breakdownKey = `dlg-bd-${activeVendorId}-${dIdx}`;
+                const isCopied = copiedKey === copyKey;
+                const isExpanded = expandedBreakdownKey === breakdownKey;
+                const dlgKK = getSentenceKKPhonetic(dlg.english);
+                const dlgHomophone = getMandarinPhoneticFromSentence(dlg.english)
+                  .replace(/^【\s*|\s*】$/g, '')
+                  .trim();
+                const dlgZhuyin = convertPhoneticToZhuyin(dlgHomophone)
+                  .replace(/^【\s*|\s*】$/g, '')
+                  .trim();
+                return (
+                  <div 
+                    key={dIdx} 
+                    className={`p-3 rounded-xl border transition-all space-y-1.5 ${
+                      playingLineIdx === dIdx
+                        ? 'bg-cyan-950/40 border-cyan-400 ring-1 ring-cyan-400/50'
+                        : dlg.speaker === 'FSE'
+                        ? 'bg-slate-900/80 border-cyan-500/30'
+                        : 'bg-indigo-950/30 border-indigo-500/30'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${
+                        dlg.speaker === 'FSE'
+                          ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
+                          : 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
+                      }`}>
+                        {dlg.speaker === 'FSE' ? 'FSE 工程師' : '設備技術專家'}
+                      </span>
 
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          playClickSound();
-                          setExpandedBreakdownKey(isExpanded ? null : breakdownKey);
-                        }}
-                        className={`px-2 py-1 rounded-lg border text-[10px] font-mono font-bold transition-all cursor-pointer ${
-                          isExpanded
-                            ? 'bg-cyan-400 text-slate-950 border-cyan-300 font-black'
-                            : 'bg-slate-800/90 hover:bg-slate-700 text-cyan-300 border-cyan-500/40'
-                        }`}
-                        title="展開零基礎逐字導讀字卡"
-                      >
-                        {isExpanded ? '收起' : '拆解'}
-                      </button>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => handleSpeakLine(dlg.english, dIdx, 0.85)}
+                          className={`px-2.5 py-1 rounded-lg border text-xs font-mono font-bold flex items-center gap-1 transition-all cursor-pointer whitespace-nowrap ${
+                            playingLineIdx === dIdx
+                              ? 'bg-cyan-500/20 text-cyan-300 border-cyan-400'
+                              : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
+                          }`}
+                        >
+                          <Volume2 className={`w-3.5 h-3.5 ${playingLineIdx === dIdx ? 'text-cyan-400' : ''}`} />
+                          <span className="text-[10px]">發音</span>
+                        </button>
 
-                      <button
-                        onClick={() => handleCopyText(`${dlg.english}\n${dlg.chinese}`, copyKey)}
-                        className="p-1.5 rounded-lg bg-slate-800/90 hover:bg-slate-700 text-slate-400 hover:text-white border border-slate-700 text-xs transition-all cursor-pointer"
-                        title="複製對話台詞"
-                      >
-                        {isCopied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => handleSpeakLine(dlg.english, dIdx, 0.7)}
+                          className="px-2 py-1 rounded-lg border border-amber-500/35 bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 text-[10px] font-mono font-bold tabular-nums transition-colors cursor-pointer whitespace-nowrap"
+                          title="0.7x 慢速清晰跟讀"
+                        >
+                          0.7x
+                        </button>
 
-                      <button
-                        onClick={() => speakEnglish(dlg.english, 0.68)}
-                        className="px-2 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-[10px] font-mono font-bold transition-all cursor-pointer"
-                        title="0.68x 零基礎慢速朗讀"
-                      >
-                        慢讀
-                      </button>
-
-                      <button
-                        onClick={() => handleSpeakLine(dlg.english, dIdx)}
-                        className={`px-2.5 py-1 rounded-lg border text-xs font-mono font-bold flex items-center gap-1 transition-all cursor-pointer ${
-                          playingLineIdx === dIdx
-                            ? 'bg-cyan-500/20 text-cyan-300 border-cyan-400'
-                            : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
-                        }`}
-                        title="聆聽發音"
-                      >
-                        <Volume2 className={`w-3.5 h-3.5 ${playingLineIdx === dIdx ? 'animate-bounce text-cyan-400' : ''}`} />
-                        <span className="text-[10px]">發音</span>
-                      </button>
+                        <button
+                          type="button"
+                          aria-expanded={isExpanded}
+                          onClick={() => {
+                            playClickSound();
+                            setExpandedBreakdownKey(isExpanded ? null : breakdownKey);
+                          }}
+                          className={`px-2.5 py-1 rounded-lg border text-[10px] font-mono font-bold transition-all cursor-pointer whitespace-nowrap ${
+                            isExpanded
+                              ? 'bg-cyan-400 text-slate-950 border-cyan-300 font-black'
+                              : 'bg-slate-800/90 hover:bg-slate-700 text-cyan-300 border-cyan-500/40'
+                          }`}
+                        >
+                          拆解 {isExpanded ? '▴' : '▾'}
+                        </button>
+                      </div>
                     </div>
-                  </div>
 
-                  {isExpanded ? (
-                    <InteractiveSentenceViewer
-                      sentence={dlg.english}
-                      chinese={dlg.chinese}
-                      speechSpeed={0.82}
-                    />
-                  ) : (
-                    <p className="text-xs sm:text-sm font-semibold text-slate-100 font-mono leading-relaxed break-words">
-                      {dlg.english}
+                    {isExpanded ? (
+                      <div className="space-y-1.5">
+                        <InteractiveSentenceViewer
+                          sentence={dlg.english}
+                          chinese={dlg.chinese}
+                          speechSpeed={0.82}
+                        />
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleSpeakLine(dlg.english, dIdx, 0.7)}
+                            className="px-2 py-0.5 rounded bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-[10px] font-mono font-bold tabular-nums cursor-pointer"
+                          >
+                            0.7x 慢讀
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleCopyText(`${dlg.english}\n${dlg.chinese}`, copyKey)}
+                            className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-[10px] font-mono cursor-pointer flex items-center gap-1"
+                          >
+                            {isCopied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                            <span>{isCopied ? '已複製' : '複製'}</span>
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-xs sm:text-sm font-semibold text-slate-100 font-mono leading-relaxed break-words">
+                        {dlg.english}
+                      </p>
+                    )}
+                    <p className="text-xs text-slate-200 font-medium flex items-start gap-1.5">
+                      <span className="text-cyan-400 font-bold shrink-0">↳ 中文：</span>
+                      <span>{dlg.chinese}</span>
                     </p>
-                  )}
-                  <p className="text-xs text-slate-200 font-medium flex items-start gap-1.5">
-                    <span className="text-cyan-400 font-bold shrink-0">↳ 中文：</span>
-                    <span>{dlg.chinese}</span>
-                  </p>
-                  <div className="pt-1.5 border-t border-slate-800/80 space-y-1 text-[11px] font-mono">
-                    <div className="text-cyan-300 break-words">
-                      <span className="text-slate-400">KK音標：</span>{dlgKK}
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
-                      <div className="text-emerald-300 break-words">
-                        <span className="text-slate-400">注音：</span>【 {dlgZhuyin} 】
+                    <div className="pt-1.5 border-t border-slate-800/80 space-y-1 text-[11px] font-mono">
+                      <div className="text-cyan-300 break-words">
+                        <span className="text-slate-400">KK音標：</span>{dlgKK}
                       </div>
-                      <div className="text-amber-300 break-words">
-                        <span className="text-slate-400">諧音：</span>【 {dlgHomophone} 】
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
+                        <div className="text-emerald-300 break-words">
+                          <span className="text-slate-400">注音：</span>【 {dlgZhuyin} 】
+                        </div>
+                        <div className="text-amber-300 break-words">
+                          <span className="text-slate-400">諧音：</span>【 {dlgHomophone} 】
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
-        {/* Section 2: Common Alarm Codes & English Recovery SOP */}
-        <div className="space-y-2">
-          <h4 className="text-xs font-mono font-bold text-slate-200 flex items-center gap-1.5">
-            <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
-            <span>警報與 SOP 處置</span>
-          </h4>
+        {/* Section 2: Collapsible Common Alarm Codes & English Recovery SOP */}
+        <div className="border border-slate-800 rounded-xl bg-slate-950/50 overflow-hidden">
+          <button
+            type="button"
+            aria-expanded={showAlarms}
+            onClick={() => {
+              playClickSound();
+              setShowAlarms((prev) => !prev);
+            }}
+            className="w-full px-3 py-2.5 flex items-center justify-between gap-2 text-left bg-slate-900/40 hover:bg-slate-900/70 transition-colors cursor-pointer"
+          >
+            <span className="text-xs font-mono font-bold text-slate-200 flex items-center gap-1.5 tabular-nums">
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+              <span>警報與 SOP 處置（{currentVendor.commonAlarms.length} 項）</span>
+            </span>
+            <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${showAlarms ? 'rotate-180' : ''}`} />
+          </button>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-            {currentVendor.commonAlarms.map((alarm, aIdx) => {
-              const copyKey = `alarm-${activeVendorId}-${aIdx}`;
-              const alarmBreakdownKey = `alarm-bd-${activeVendorId}-${aIdx}`;
-              const isCopied = copiedKey === copyKey;
-              const isAlarmExpanded = expandedBreakdownKey === alarmBreakdownKey;
-              return (
-                <div key={aIdx} className="bg-slate-950/80 p-3 rounded-xl border border-slate-800/80 space-y-2 flex flex-col justify-between">
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between">
-                      <span className="font-mono text-xs font-black text-rose-400 px-2 py-0.5 rounded bg-rose-950/60 border border-rose-500/30">
+          {showAlarms && (
+            <div className="p-3 border-t border-slate-800/80 grid grid-cols-1 md:grid-cols-2 gap-2.5">
+              {currentVendor.commonAlarms.map((alarm, aIdx) => {
+                const copyKey = `alarm-${activeVendorId}-${aIdx}`;
+                const alarmBreakdownKey = `alarm-bd-${activeVendorId}-${aIdx}`;
+                const isCopied = copiedKey === copyKey;
+                const isAlarmExpanded = expandedBreakdownKey === alarmBreakdownKey;
+                return (
+                  <div key={aIdx} className="bg-slate-950/80 p-3 rounded-xl border border-slate-800/80 space-y-2 flex flex-col justify-between">
+                    <div className="space-y-1">
+                      <span className="inline-block font-mono text-xs font-black text-rose-400 px-2 py-0.5 rounded bg-rose-950/60 border border-rose-500/30">
                         {alarm.code}
                       </span>
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => handleCopyText(`[${alarm.code}] ${alarm.description}\nSOP: ${alarm.englishSop}\n${alarm.chineseSop}`, copyKey)}
-                          className="p-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-800 cursor-pointer"
-                          title="複製報錯代碼與 SOP"
-                        >
-                          {isCopied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                        </button>
-                        <span className="text-[10px] font-mono text-slate-400 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">
-                          ALARM
-                        </span>
+                      <div className="text-xs font-bold text-slate-100 pt-0.5">
+                        {alarm.description}
                       </div>
                     </div>
-                    <div className="text-xs font-bold text-slate-100 pt-0.5">
-                      {alarm.description}
-                    </div>
-                  </div>
-                  
-                  <div className="bg-slate-900/90 p-2.5 rounded-xl border border-slate-800 space-y-1.5">
-                    <div className="flex items-center justify-between gap-1 flex-wrap">
-                      <span className="text-[10px] font-mono text-emerald-400 font-bold">SOP 處置:</span>
-                      <div className="flex items-center gap-1 flex-wrap">
-                        <button
-                          onClick={() => setExpandedBreakdownKey(isAlarmExpanded ? null : alarmBreakdownKey)}
-                          className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold transition-colors cursor-pointer border ${
-                            isAlarmExpanded
-                              ? 'bg-cyan-500 text-slate-950 border-cyan-300'
-                              : 'bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 border-cyan-500/30'
-                          }`}
-                          title="展開逐字中文、注音與諧音拆解"
-                        >
-                          {isAlarmExpanded ? '收合' : '拆解'}
-                        </button>
-                        <button
-                          onClick={() => speakEnglish(alarm.englishSop, 0.68)}
-                          className="px-2 py-0.5 rounded bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-[10px] font-mono font-bold transition-colors cursor-pointer"
-                          title="0.68x 慢速朗讀 SOP"
-                        >
-                          慢讀
-                        </button>
-                        <button
-                          onClick={() => handleSpeakLine(alarm.englishSop, 100 + aIdx)}
-                          className="px-2 py-0.5 rounded bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 text-[10px] font-mono font-bold flex items-center gap-1 transition-colors cursor-pointer"
-                          title="朗讀 SOP 英文"
-                        >
-                          <Volume2 className="w-3 h-3" />
-                          <span>SOP</span>
-                        </button>
+                    
+                    <div className="bg-slate-900/90 p-2.5 rounded-xl border border-slate-800 space-y-1.5">
+                      <div className="flex items-center justify-between gap-1 flex-wrap">
+                        <span className="text-[10px] font-mono text-emerald-400 font-bold">SOP 處置:</span>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleSpeakLine(alarm.englishSop, 100 + aIdx, 0.85)}
+                            className="px-2 py-0.5 rounded bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 text-[10px] font-mono font-bold flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap"
+                          >
+                            <Volume2 className="w-3 h-3" />
+                            <span>朗讀 SOP</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleSpeakLine(alarm.englishSop, 100 + aIdx, 0.7)}
+                            className="px-1.5 py-0.5 rounded bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-[10px] font-mono font-bold tabular-nums transition-colors cursor-pointer whitespace-nowrap"
+                            title="0.7x 慢速朗讀 SOP"
+                          >
+                            0.7x
+                          </button>
+                          <button
+                            type="button"
+                            aria-expanded={isAlarmExpanded}
+                            onClick={() => {
+                              playClickSound();
+                              setExpandedBreakdownKey(isAlarmExpanded ? null : alarmBreakdownKey);
+                            }}
+                            className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold transition-colors cursor-pointer border whitespace-nowrap ${
+                              isAlarmExpanded
+                                ? 'bg-cyan-500 text-slate-950 border-cyan-300'
+                                : 'bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 border-cyan-500/30'
+                            }`}
+                          >
+                            拆解 {isAlarmExpanded ? '▴' : '▾'}
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                    <p className="text-xs font-mono text-emerald-200/95 leading-relaxed break-words">
-                      {alarm.englishSop}
-                    </p>
-                    <p className="text-[11px] text-slate-200 font-medium flex items-start gap-1">
-                      <span className="text-emerald-400 font-bold shrink-0">↳ 中文：</span>
-                      <span>{alarm.chineseSop}</span>
-                    </p>
-                    {(() => {
-                      const sopKK = getSentenceKKPhonetic(alarm.englishSop);
-                      const sopHomophone = getMandarinPhoneticFromSentence(alarm.englishSop)
-                        .replace(/^【\s*|\s*】$/g, '')
-                        .trim();
-                      const sopZhuyin = convertPhoneticToZhuyin(sopHomophone)
-                        .replace(/^【\s*|\s*】$/g, '')
-                        .trim();
-                      return (
-                        <div className="pt-1 border-t border-slate-800/80 space-y-0.5 text-[10px] font-mono">
-                          <div className="text-cyan-300 break-words">
-                            <span className="text-slate-400">KK音標：</span>{sopKK}
+                      <p className="text-xs font-mono text-emerald-200/95 leading-relaxed break-words">
+                        {alarm.englishSop}
+                      </p>
+                      <p className="text-[11px] text-slate-200 font-medium flex items-start gap-1">
+                        <span className="text-emerald-400 font-bold shrink-0">↳ 中文：</span>
+                        <span>{alarm.chineseSop}</span>
+                      </p>
+                      {(() => {
+                        const sopKK = getSentenceKKPhonetic(alarm.englishSop);
+                        const sopHomophone = getMandarinPhoneticFromSentence(alarm.englishSop)
+                          .replace(/^【\s*|\s*】$/g, '')
+                          .trim();
+                        const sopZhuyin = convertPhoneticToZhuyin(sopHomophone)
+                          .replace(/^【\s*|\s*】$/g, '')
+                          .trim();
+                        return (
+                          <div className="pt-1 border-t border-slate-800/80 space-y-0.5 text-[10px] font-mono">
+                            <div className="text-cyan-300 break-words">
+                              <span className="text-slate-400">KK音標：</span>{sopKK}
+                            </div>
+                            <div className="text-emerald-300 break-words">
+                              <span className="text-slate-400">注音：</span>【 {sopZhuyin} 】
+                            </div>
+                            <div className="text-amber-300 break-words">
+                              <span className="text-slate-400">諧音：</span>【 {sopHomophone} 】
+                            </div>
                           </div>
-                          <div className="text-emerald-300 break-words">
-                            <span className="text-slate-400">注音：</span>【 {sopZhuyin} 】
-                          </div>
-                          <div className="text-amber-300 break-words">
-                            <span className="text-slate-400">諧音：</span>【 {sopHomophone} 】
+                        );
+                      })()}
+                      {isAlarmExpanded && (
+                        <div className="pt-1.5 space-y-1.5">
+                          <InteractiveSentenceViewer
+                            sentence={alarm.englishSop}
+                            chinese={alarm.chineseSop}
+                          />
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleSpeakLine(alarm.englishSop, 100 + aIdx, 0.7)}
+                              className="px-2 py-0.5 rounded bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-[10px] font-mono font-bold tabular-nums cursor-pointer"
+                            >
+                              0.7x 慢讀
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleCopyText(`[${alarm.code}] ${alarm.description}\nSOP: ${alarm.englishSop}\n${alarm.chineseSop}`, copyKey)}
+                              className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-[10px] font-mono cursor-pointer flex items-center gap-1"
+                            >
+                              {isCopied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                              <span>{isCopied ? '已複製' : '複製'}</span>
+                            </button>
                           </div>
                         </div>
-                      );
-                    })()}
-                    {isAlarmExpanded && (
-                      <div className="pt-1.5">
-                        <InteractiveSentenceViewer
-                          sentence={alarm.englishSop}
-                          chinese={alarm.chineseSop}
-                        />
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
-        {/* Section 3: System Jargon & Acronym Flashcards */}
-        <div className="space-y-2">
-          <h4 className="text-xs font-mono font-bold text-slate-200 flex items-center gap-1.5">
-            <Zap className="w-3.5 h-3.5 text-amber-300" />
-            <span>設備核心術語</span>
-          </h4>
+        {/* Section 3: Collapsible System Jargon & Acronym Flashcards */}
+        <div className="border border-slate-800 rounded-xl bg-slate-950/50 overflow-hidden">
+          <button
+            type="button"
+            aria-expanded={showTerms}
+            onClick={() => {
+              playClickSound();
+              setShowTerms((prev) => !prev);
+            }}
+            className="w-full px-3 py-2.5 flex items-center justify-between gap-2 text-left bg-slate-900/40 hover:bg-slate-900/70 transition-colors cursor-pointer"
+          >
+            <span className="text-xs font-mono font-bold text-slate-200 flex items-center gap-1.5 tabular-nums">
+              <Zap className="w-3.5 h-3.5 text-amber-300" />
+              <span>設備核心術語（{currentVendor.systemTerms.length} 詞）</span>
+            </span>
+            <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${showTerms ? 'rotate-180' : ''}`} />
+          </button>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-            {currentVendor.systemTerms.map((term, tIdx) => {
-              const cleanPhonetic = term.phonetic.replace(/^\[|\]$/g, '').trim();
-              const zhuyin = convertPhoneticToZhuyin(cleanPhonetic).replace(/^【\s*|\s*】$/g, '').trim();
-              const kkDisplay = term.kk || getWordKKPhonetic(term.term);
-              return (
-                <div
-                  key={tIdx}
-                  onClick={() => handleSpeakLine(term.term, 200 + tIdx)}
-                  className="bg-slate-950/90 hover:border-cyan-500/50 p-3 rounded-xl border border-slate-800/80 space-y-2 transition-all cursor-pointer group"
-                >
-                  <div className="flex items-center justify-between border-b border-slate-800/80 pb-1.5">
-                    <span className="font-mono text-sm font-black text-cyan-300 group-hover:text-cyan-200">{term.term}</span>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleSpeakLine(term.term, 200 + tIdx);
-                      }}
-                      className="p-1 rounded-lg bg-slate-900 text-cyan-400 hover:bg-cyan-400 hover:text-slate-950 border border-slate-800 cursor-pointer transition-colors"
-                    >
-                      <Volume2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-
-                  <div className="space-y-1 text-[11px]">
-                    <div className="flex items-center gap-1.5">
-                      <span className="px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-[9px] font-mono font-bold shrink-0">
-                        KK音標
-                      </span>
-                      <span className="font-mono font-black text-cyan-300 tracking-wide break-words">
-                        {kkDisplay}
-                      </span>
+          {showTerms && (
+            <div className="p-3 border-t border-slate-800/80 grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              {currentVendor.systemTerms.map((term, tIdx) => {
+                const cleanPhonetic = term.phonetic.replace(/^\[|\]$/g, '').trim();
+                const zhuyin = convertPhoneticToZhuyin(cleanPhonetic).replace(/^【\s*|\s*】$/g, '').trim();
+                const kkDisplay = term.kk || getWordKKPhonetic(term.term);
+                return (
+                  <div
+                    key={tIdx}
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`朗讀術語 ${term.term}`}
+                    onClick={() => handleSpeakLine(term.term, 200 + tIdx, 0.85)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        handleSpeakLine(term.term, 200 + tIdx, 0.85);
+                      }
+                    }}
+                    className="bg-slate-950/90 hover:border-cyan-500/50 p-3 rounded-xl border border-slate-800/80 space-y-2 transition-all cursor-pointer group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+                  >
+                    <div className="flex items-center justify-between gap-1.5 border-b border-slate-800/80 pb-1.5">
+                      <span className="font-mono text-sm font-black text-cyan-300 group-hover:text-cyan-200">{term.term}</span>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleSpeakLine(term.term, 200 + tIdx, 0.7);
+                          }}
+                          className="px-1.5 py-0.5 rounded-md bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-[10px] font-mono font-bold tabular-nums cursor-pointer transition-colors"
+                          title="0.7x 慢速發音"
+                        >
+                          0.7x
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleSpeakLine(term.term, 200 + tIdx, 0.85);
+                          }}
+                          aria-label={`發音 ${term.term}`}
+                          className="p-1 rounded-lg bg-slate-900 text-cyan-400 hover:bg-cyan-400 hover:text-slate-950 border border-slate-800 cursor-pointer transition-colors"
+                        >
+                          <Volume2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
-                    {zhuyin && (
+
+                    <div className="space-y-1 text-[11px]">
                       <div className="flex items-center gap-1.5">
-                        <span className="px-1.5 py-0.2 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 text-[9px] font-mono font-bold shrink-0">
-                          注音
+                        <span className="px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-[9px] font-mono font-bold shrink-0">
+                          KK
                         </span>
-                        <span className="font-mono font-black text-amber-300 tracking-wider break-words">
-                          【 {zhuyin} 】
+                        <span className="font-mono font-black text-cyan-300 tracking-wide break-words">
+                          {kkDisplay}
                         </span>
                       </div>
-                    )}
-                    <div className="flex items-center gap-1.5">
-                      <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[9px] font-mono font-bold shrink-0">
-                        諧音
-                      </span>
-                      <span className="font-sans font-bold text-emerald-300 tracking-wider break-words">
-                        【 {cleanPhonetic} 】
-                      </span>
+                      {zhuyin && (
+                        <div className="flex items-center gap-1.5">
+                          <span className="px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 text-[9px] font-mono font-bold shrink-0">
+                            注音
+                          </span>
+                          <span className="font-mono font-black text-amber-300 tracking-wider break-words">
+                            【 {zhuyin} 】
+                          </span>
+                        </div>
+                      )}
+                      <div className="flex items-center gap-1.5">
+                        <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[9px] font-mono font-bold shrink-0">
+                          諧音
+                        </span>
+                        <span className="font-sans font-bold text-emerald-300 tracking-wider break-words">
+                          【 {cleanPhonetic} 】
+                        </span>
+                      </div>
                     </div>
-                  </div>
 
-                  <p className="text-xs text-slate-300 leading-snug pt-0.5 border-t border-slate-900">
-                    {term.definition}
-                  </p>
-                </div>
-              );
-            })}
-          </div>
+                    <p className="text-xs text-slate-300 leading-snug pt-0.5 border-t border-slate-900">
+                      {term.definition}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
       </div>

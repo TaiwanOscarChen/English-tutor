@@ -170,8 +170,8 @@ const RAW_PRESET_LESSONS: Lesson[] = [
       object: "the loadport (📦 晶圓載具平台)",
       bridge: "the (🌉 橋樑)"
     },
-    phonetic_taiwan: "【 愛 ｜ 額-賴-恩 ｜ 德 ｜ 扣-特 】",
-    memory_trick: "「愛」維修的我 ➔ 依靠「額」「賴」著重新校準 ➔ 晶圓盒載具平台。",
+    phonetic_taiwan: "【 愛 ｜ 額-賴-恩 ｜ 德 ｜ 漏-德-破-特 】",
+    memory_trick: "「愛」維修的我 ➔ 「額」外「賴」著不走重新對齊 ➔ 別讓晶圓「漏」掉的「破-特」載具平台。",
     additional_context: "極簡 4 字句：I (主) + align (動) + the loadport (名)",
     category: "wafer-transfer"
   },
@@ -332,7 +332,7 @@ const RAW_PRESET_LESSONS: Lesson[] = [
     },
     phonetic_taiwan: "【 德-羅-霸-特 ｜ 克-藍-普-斯 ｜ 德 ｜ 富-普 】",
     memory_trick: "機械手臂「克」服萬難「藍」「普」夾緊 ➔ 滿載12吋高價晶圓的「富」「普」晶圓盒。",
-    additional_context: "極簡 4 字句：The robot (主) + clamps (動) + the FOUP (名)",
+    additional_context: "極簡 5 字句：The robot (主) + clamps (動) + the FOUP (名)",
     category: "wafer-transfer"
   },
   {
@@ -370,3 +370,141 @@ const RAW_PRESET_LESSONS: Lesson[] = [
 ];
 
 export const PRESET_LESSONS: Lesson[] = RAW_PRESET_LESSONS.map((l) => sanitizeLessonToPublicSafe(l).lesson);
+
+export const PRESET_LESSONS_OVERRIDES_KEY = "fse_preset_lessons_overrides_v1";
+export const PRESET_LESSONS_UPDATED_EVENT = "fse-preset-lessons-updated";
+
+export interface PresetLessonPatch {
+  id: string;
+  english_sentence: string;
+  chinese_translation: string;
+  components: {
+    subject: string;
+    action: string;
+    object: string;
+    bridge?: string;
+  };
+  phonetic_taiwan: string;
+  memory_trick: string;
+  additional_context?: string;
+  scenario?: string;
+  category?: string;
+}
+
+export function loadPresetLessonOverrides(): Record<string, PresetLessonPatch> {
+  if (typeof window === "undefined" || typeof localStorage === "undefined") {
+    return {};
+  }
+  try {
+    const raw = localStorage.getItem(PRESET_LESSONS_OVERRIDES_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, PresetLessonPatch>;
+    }
+  } catch {}
+  return {};
+}
+
+/**
+ * 取得合併批量優化補丁後的即時 PRESET_LESSONS 清單
+ */
+export function getActivePresetLessons(
+  externalOverrides?: Record<string, PresetLessonPatch>
+): Lesson[] {
+  const overrides = externalOverrides ?? loadPresetLessonOverrides();
+  const baseIds = new Set(PRESET_LESSONS.map((l) => l.id));
+
+  const mergedBase = PRESET_LESSONS.map((lesson) => {
+    const patch = overrides[lesson.id];
+    if (!patch) return lesson;
+    const merged: Lesson = {
+      ...lesson,
+      english_sentence: patch.english_sentence || lesson.english_sentence,
+      chinese_translation: patch.chinese_translation || lesson.chinese_translation,
+      components: {
+        subject: patch.components?.subject || lesson.components.subject,
+        action: patch.components?.action || lesson.components.action,
+        object: patch.components?.object || lesson.components.object,
+        bridge: patch.components?.bridge ?? lesson.components.bridge,
+      },
+      phonetic_taiwan: patch.phonetic_taiwan || lesson.phonetic_taiwan,
+      memory_trick: patch.memory_trick || lesson.memory_trick,
+      additional_context: patch.additional_context || lesson.additional_context,
+      scenario: patch.scenario || lesson.scenario,
+      category: patch.category || lesson.category,
+    };
+    return sanitizeLessonToPublicSafe(merged).lesson;
+  });
+
+  // 若針對非 preset 來源的 baseLessons（例如 3-day / imported）批量優化並確認納入 presetLessons，也一併寫入覆寫映射
+  const appended: Lesson[] = [];
+  Object.values(overrides).forEach((patch) => {
+    if (patch?.id && !baseIds.has(patch.id)) {
+      appended.push(
+        sanitizeLessonToPublicSafe({
+          id: patch.id,
+          scenario: patch.scenario || "🎬 情境：經由國小拆解法與台式諧音優化的晶圓廠精簡句型。",
+          english_sentence: patch.english_sentence,
+          chinese_translation: patch.chinese_translation,
+          components: patch.components,
+          phonetic_taiwan: patch.phonetic_taiwan,
+          memory_trick: patch.memory_trick,
+          additional_context: patch.additional_context,
+          category: patch.category || "shift-handover",
+        }).lesson
+      );
+    }
+  });
+
+  return [...appended, ...mergedBase];
+}
+
+/**
+ * 經使用者確認後批量更新 presetLessons（寫入本地持久化並廣播全局即時更新事件）
+ */
+export function applyPresetLessonBatchUpdates(patches: PresetLessonPatch[]): {
+  updatedCount: number;
+  activeLessons: Lesson[];
+  overrides: Record<string, PresetLessonPatch>;
+} {
+  const existing = loadPresetLessonOverrides();
+  const next: Record<string, PresetLessonPatch> = { ...existing };
+  let updatedCount = 0;
+
+  for (const patch of patches) {
+    if (!patch || !patch.id || !patch.english_sentence?.trim()) continue;
+    next[patch.id] = {
+      ...patch,
+      english_sentence: patch.english_sentence.trim(),
+      chinese_translation: (patch.chinese_translation || "").trim(),
+      phonetic_taiwan: (patch.phonetic_taiwan || "").trim(),
+      memory_trick: (patch.memory_trick || "").trim(),
+    };
+    updatedCount++;
+  }
+
+  if (typeof window !== "undefined" && typeof localStorage !== "undefined") {
+    try {
+      localStorage.setItem(PRESET_LESSONS_OVERRIDES_KEY, JSON.stringify(next));
+      window.dispatchEvent(new CustomEvent(PRESET_LESSONS_UPDATED_EVENT, { detail: { updatedCount } }));
+    } catch {}
+  }
+
+  return {
+    updatedCount,
+    activeLessons: getActivePresetLessons(next),
+    overrides: next,
+  };
+}
+
+export function resetPresetLessonOverrides(): Lesson[] {
+  if (typeof window !== "undefined" && typeof localStorage !== "undefined") {
+    try {
+      localStorage.removeItem(PRESET_LESSONS_OVERRIDES_KEY);
+      window.dispatchEvent(new CustomEvent(PRESET_LESSONS_UPDATED_EVENT, { detail: { reset: true } }));
+    } catch {}
+  }
+  return [...PRESET_LESSONS];
+}
+

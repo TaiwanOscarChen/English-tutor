@@ -85,14 +85,10 @@ export const OfflineCachePromptBanner: React.FC<OfflineCachePromptBannerProps> =
             
             {/* Left: Signal Badge & Info Text */}
             <div className="flex items-start gap-3 flex-1 min-w-0">
-              <div className="relative shrink-0 mt-0.5">
-                <div className="p-2.5 bg-gradient-to-br from-amber-400 to-yellow-500 rounded-xl text-slate-950 font-black shadow-lg shadow-amber-500/30 flex items-center justify-center animate-pulse">
+              <div className="shrink-0 mt-0.5">
+                <div className="p-2.5 bg-gradient-to-br from-amber-400 to-yellow-500 rounded-xl text-slate-950 font-black shadow-lg shadow-amber-500/30 flex items-center justify-center">
                   <WifiOff className="w-5 h-5 stroke-[2.5]" />
                 </div>
-                <span className="absolute -bottom-1 -right-1 flex h-3 w-3">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500 border border-slate-950"></span>
-                </span>
               </div>
 
               <div className="space-y-1.5 min-w-0 flex-1">
@@ -108,7 +104,7 @@ export const OfflineCachePromptBanner: React.FC<OfflineCachePromptBannerProps> =
                     </span>
                   )}
 
-                  <span className="text-[11px] text-slate-400 font-mono flex items-center gap-1">
+                  <span className="text-[11px] text-slate-400 font-mono flex items-center gap-1 tabular-nums">
                     <Database className="w-3 h-3 text-cyan-400" />
                     已快取 {cachedPackagesCount.sentences} 組句型 + {totalVocabCount} 組單字
                   </span>
@@ -123,7 +119,7 @@ export const OfflineCachePromptBanner: React.FC<OfflineCachePromptBannerProps> =
                   id="offline-cache-package-progress-container"
                   className="bg-slate-900/90 border border-slate-800/80 rounded-xl p-2 sm:px-3 sm:py-1.5 shadow-inner space-y-1.5 max-w-xl"
                 >
-                  <div className="flex items-center justify-between text-[11px] font-mono">
+                  <div className="flex items-center justify-between text-[11px] font-mono tabular-nums">
                     <span className="flex items-center gap-1.5 font-bold text-slate-300">
                       <HardDrive className="w-3.5 h-3.5 text-cyan-400" />
                       <span>無塵室離線教材包準備進度</span>
@@ -152,14 +148,11 @@ export const OfflineCachePromptBanner: React.FC<OfflineCachePromptBannerProps> =
                           ? 'bg-gradient-to-r from-cyan-400 via-teal-400 to-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.5)]'
                           : 'bg-gradient-to-r from-amber-500 to-yellow-400'
                       }`}
-                    >
-                      {/* Scanning beam highlight */}
-                      <span className="absolute inset-0 bg-white/25 rounded-full animate-pulse pointer-events-none" />
-                    </motion.div>
+                    />
                   </div>
 
                   {/* Cache Package Breakdown Pills */}
-                  <div className="flex items-center gap-2 pt-0.5 text-[10px] text-slate-400 font-mono flex-wrap">
+                  <div className="flex items-center gap-2 pt-0.5 text-[10px] text-slate-400 font-mono flex-wrap tabular-nums">
                     <span className="flex items-center gap-1 text-cyan-300">
                       <Zap className="w-2.5 h-2.5 text-cyan-400" />
                       SVO句型庫: {cachedPackagesCount.sentences}/24
@@ -182,13 +175,13 @@ export const OfflineCachePromptBanner: React.FC<OfflineCachePromptBannerProps> =
                     <Volume2 className="w-3.5 h-3.5" /> 本機語音合成 100% 正常
                   </span>
                   <span className="text-slate-500">•</span>
-                  <span>
+                  <span className="tabular-nums">
                     複習進度：<strong className="text-amber-300 font-mono">{reviewedCount}</strong> / {totalVocabCount}
                   </span>
                   {playlist.isPlaying && !playlist.isPaused && playlist.currentItem && (
                     <>
                       <span className="text-slate-500">•</span>
-                      <span className="text-amber-300 font-bold animate-pulse flex items-center gap-1">
+                      <span className="text-amber-300 font-bold flex items-center gap-1 tabular-nums">
                         🎧 正在連續朗讀：{playlist.currentItem.word} [{playlist.currentIndex + 1}/{playlist.totalItemsCount}]
                       </span>
                     </>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   X,
@@ -16,7 +16,7 @@ import {
   BookOpen
 } from 'lucide-react';
 import { FAB_SCENARIOS, FabScenario, ScenarioChoice } from '../data/fabScenarios';
-import { speakEnglish } from '../utils/speech';
+import { speakEnglish, cancelSpeech } from '../utils/speech';
 import {
   playClickSound,
   playSuccessChime,
@@ -45,7 +45,14 @@ export const FabScenarioSimulatorModal: React.FC<FabScenarioSimulatorModalProps>
   const [completedScenarios, setCompletedScenarios] = useState<string[]>([]);
   const [showFullSummary, setShowFullSummary] = useState(false);
 
-  if (!isOpen) return null;
+  const maxTotalXp = useMemo(
+    () =>
+      FAB_SCENARIOS.reduce(
+        (sum, scenario) => sum + Math.max(0, ...scenario.choices.map((c) => c.score)),
+        0
+      ),
+    []
+  );
 
   const currentScenario = FAB_SCENARIOS[currentScenarioIndex];
   const selectedChoice = currentScenario?.choices.find((c) => c.id === selectedChoiceId);
@@ -57,7 +64,7 @@ export const FabScenarioSimulatorModal: React.FC<FabScenarioSimulatorModalProps>
   };
 
   const handleSubmit = () => {
-    if (!selectedChoiceId || hasSubmitted) return;
+    if (!selectedChoiceId || hasSubmitted || !currentScenario) return;
 
     setHasSubmitted(true);
     const choice = currentScenario.choices.find((c) => c.id === selectedChoiceId);
@@ -80,6 +87,7 @@ export const FabScenarioSimulatorModal: React.FC<FabScenarioSimulatorModalProps>
   };
 
   const handleNext = () => {
+    cancelSpeech();
     playLaserScanSound();
     if (currentScenarioIndex < FAB_SCENARIOS.length - 1) {
       setCurrentScenarioIndex((prev) => prev + 1);
@@ -94,6 +102,7 @@ export const FabScenarioSimulatorModal: React.FC<FabScenarioSimulatorModalProps>
   };
 
   const handleRestart = () => {
+    cancelSpeech();
     playWaferSnapSound();
     setCurrentScenarioIndex(0);
     setSelectedChoiceId(null);
@@ -103,9 +112,63 @@ export const FabScenarioSimulatorModal: React.FC<FabScenarioSimulatorModalProps>
     setCompletedScenarios([]);
   };
 
+  useEffect(() => {
+    if (!isOpen) {
+      cancelSpeech();
+      return;
+    }
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        cancelSpeech();
+        onClose();
+        return;
+      }
+      if (showFullSummary || !currentScenario) return;
+      const lower = e.key.toLowerCase();
+      const idxMap: Record<string, number> = {
+        '1': 0, a: 0,
+        '2': 1, b: 1,
+        '3': 2, c: 2,
+        '4': 3, d: 3
+      };
+      if (!hasSubmitted && lower in idxMap) {
+        const targetChoice = currentScenario.choices[idxMap[lower]];
+        if (targetChoice) {
+          e.preventDefault();
+          handleSelectChoice(targetChoice.id);
+        }
+        return;
+      }
+      if (e.key === 'Enter') {
+        if (!hasSubmitted && selectedChoiceId) {
+          e.preventDefault();
+          handleSubmit();
+        } else if (hasSubmitted) {
+          e.preventDefault();
+          handleNext();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose, showFullSummary, currentScenario, hasSubmitted, selectedChoiceId, totalScore]);
+
+  if (!isOpen) return null;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-md">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="無塵室實戰對話情境模擬闖關"
+      onClick={() => {
+        cancelSpeech();
+        onClose();
+      }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-md"
+    >
       <motion.div
+        onClick={(e) => e.stopPropagation()}
         initial={{ opacity: 0, scale: 0.95, y: 10 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95, y: 10 }}
@@ -133,17 +196,21 @@ export const FabScenarioSimulatorModal: React.FC<FabScenarioSimulatorModalProps>
           </div>
 
           <div className="flex items-center gap-2">
-            <div className="hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-xl bg-slate-950 border border-slate-800 text-amber-300 font-mono font-black text-xs">
+            <div className="hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-xl bg-slate-950 border border-slate-800 text-amber-300 font-mono font-black text-xs tabular-nums">
               <Trophy className="w-3.5 h-3.5" />
               <span>積分: {totalScore} XP</span>
             </div>
 
             <button
+              type="button"
+              aria-label="關閉對話模擬"
               onClick={() => {
+                cancelSpeech();
                 playClickSound();
                 onClose();
               }}
-              className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-all cursor-pointer"
+              className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+              title="關閉視窗 (Esc)"
             >
               <X className="w-5 h-5" />
             </button>
@@ -165,7 +232,7 @@ export const FabScenarioSimulatorModal: React.FC<FabScenarioSimulatorModalProps>
                   </span>
                 </div>
 
-                <div className="flex items-center gap-2 text-xs font-mono text-slate-400">
+                <div className="flex items-center gap-2 text-xs font-mono text-slate-400 tabular-nums">
                   <span>關卡進度:</span>
                   <span className="text-cyan-300 font-bold">
                     {currentScenarioIndex + 1} / {FAB_SCENARIOS.length}
@@ -198,17 +265,31 @@ export const FabScenarioSimulatorModal: React.FC<FabScenarioSimulatorModalProps>
                       </span>
                     </div>
 
-                    <button
-                      onClick={() => {
-                        playClickSound();
-                        speakEnglish(currentScenario.interlocutor.quoteEn, speechSpeed);
-                      }}
-                      className="px-2.5 py-1 rounded-lg bg-indigo-900/80 hover:bg-indigo-800 text-indigo-300 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
-                      title="朗讀對方的對話"
-                    >
-                      <Volume2 className="w-3.5 h-3.5" />
-                      <span>聽標準對話</span>
-                    </button>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          playClickSound();
+                          speakEnglish(currentScenario.interlocutor.quoteEn, speechSpeed);
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-indigo-900/80 hover:bg-indigo-800 text-indigo-300 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+                        title="朗讀對方的對話"
+                      >
+                        <Volume2 className="w-3.5 h-3.5" />
+                        <span>聽標準對話</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          playClickSound();
+                          speakEnglish(currentScenario.interlocutor.quoteEn, 0.7);
+                        }}
+                        className="px-2 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-amber-300 border border-amber-500/30 text-[11px] font-mono font-bold transition-colors cursor-pointer"
+                        title="0.7x 慢速清晰重聽對方對話"
+                      >
+                        0.7x
+                      </button>
+                    </div>
                   </div>
 
                   <p className="font-mono text-xs sm:text-sm font-semibold text-slate-100 italic">
@@ -222,12 +303,17 @@ export const FabScenarioSimulatorModal: React.FC<FabScenarioSimulatorModalProps>
 
               {/* Question & Choices */}
               <div className="space-y-3">
-                <div className="flex items-center gap-2 text-xs font-black text-cyan-300">
-                  <HelpCircle className="w-4 h-4" />
-                  <span>{currentScenario.questionPromptZh}</span>
+                <div className="flex items-center justify-between gap-2 text-xs font-black text-cyan-300 flex-wrap">
+                  <div className="flex items-center gap-2">
+                    <HelpCircle className="w-4 h-4" />
+                    <span>{currentScenario.questionPromptZh}</span>
+                  </div>
+                  <span className="text-[10px] font-mono font-normal text-slate-400 hidden sm:inline">
+                    支援鍵盤 A-D / 1-4 選取，Enter 確認
+                  </span>
                 </div>
 
-                <div className="space-y-2.5">
+                <div className="space-y-2.5" role="radiogroup" aria-label={currentScenario.questionPromptZh}>
                   {currentScenario.choices.map((choice, idx) => {
                     const isSelected = selectedChoiceId === choice.id;
                     let borderClass = 'border-slate-800 hover:border-slate-700 bg-slate-950/60';
@@ -245,12 +331,21 @@ export const FabScenarioSimulatorModal: React.FC<FabScenarioSimulatorModalProps>
                     return (
                       <div
                         key={choice.id}
+                        role="radio"
+                        aria-checked={isSelected}
+                        tabIndex={0}
                         onClick={() => handleSelectChoice(choice.id)}
-                        className={`p-3.5 sm:p-4 rounded-2xl border transition-all cursor-pointer ${borderClass}`}
+                        onKeyDown={(e) => {
+                          if (e.key === ' ' || e.key === 'Enter') {
+                            e.preventDefault();
+                            handleSelectChoice(choice.id);
+                          }
+                        }}
+                        className={`p-3.5 sm:p-4 rounded-2xl border transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${borderClass}`}
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex items-start gap-3">
-                            <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-mono font-black shrink-0 mt-0.5 ${
+                            <span className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs font-mono font-black shrink-0 mt-0.5 ${
                               isSelected ? 'bg-cyan-400 text-slate-950' : 'bg-slate-800 text-slate-300'
                             }`}>
                               {String.fromCharCode(65 + idx)}
@@ -265,17 +360,32 @@ export const FabScenarioSimulatorModal: React.FC<FabScenarioSimulatorModalProps>
                             </div>
                           </div>
 
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              playClickSound();
-                              speakEnglish(choice.textEn, speechSpeed);
-                            }}
-                            className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-cyan-300 shrink-0 transition-all"
-                            title="試聽此選項發音"
-                          >
-                            <Volume2 className="w-3.5 h-3.5" />
-                          </button>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                playClickSound();
+                                speakEnglish(choice.textEn, speechSpeed);
+                              }}
+                              className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-cyan-300 transition-all cursor-pointer"
+                              title="試聽此選項發音"
+                            >
+                              <Volume2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                playClickSound();
+                                speakEnglish(choice.textEn, 0.7);
+                              }}
+                              className="px-2 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-300 border border-amber-500/30 text-[10px] font-mono font-bold transition-all cursor-pointer"
+                              title="0.7x 慢速試聽此選項"
+                            >
+                              0.7x
+                            </button>
+                          </div>
                         </div>
                       </div>
                     );
@@ -359,9 +469,9 @@ export const FabScenarioSimulatorModal: React.FC<FabScenarioSimulatorModalProps>
                 </p>
               </div>
 
-              <div className="inline-flex items-center gap-3 px-6 py-3 rounded-2xl bg-cyan-950 border border-cyan-500/50 text-cyan-300 font-mono font-black text-base shadow-lg">
+              <div className="inline-flex items-center gap-3 px-6 py-3 rounded-2xl bg-cyan-950 border border-cyan-500/50 text-cyan-300 font-mono font-black text-base shadow-lg tabular-nums">
                 <Award className="w-5 h-5" />
-                <span>獲得總積分：{totalScore} / 300 XP</span>
+                <span>獲得總積分：{totalScore} / {maxTotalXp} XP</span>
               </div>
 
               <div className="pt-4">

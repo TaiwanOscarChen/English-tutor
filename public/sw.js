@@ -1,16 +1,35 @@
 // FSE Semiconductor English PWA Service Worker
-const CACHE_NAME = 'fse-semiconductor-cache-v2';
+const STATIC_CACHE_NAME = 'fse-semiconductor-static-v4';
+const RUNTIME_CACHE_NAME = 'fse-semiconductor-runtime-v4';
+const MAX_RUNTIME_CACHE_ENTRIES = 120;
+
 const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/manifest.json',
-  '/icon.svg'
+  '/icon.svg',
+  '/favicon.svg'
 ];
+
+async function trimRuntimeCache(cacheName, maxEntries) {
+  try {
+    const cache = await caches.open(cacheName);
+    const keys = await cache.keys();
+    if (keys.length > maxEntries) {
+      const overflowCount = keys.length - maxEntries;
+      for (let i = 0; i < overflowCount; i++) {
+        await cache.delete(keys[i]);
+      }
+    }
+  } catch {
+    // Ignore cache trim errors
+  }
+}
 
 // Install Event - Precache App Shell
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
+    caches.open(STATIC_CACHE_NAME).then((cache) => {
       return cache.addAll(STATIC_ASSETS).catch((err) => {
         console.warn('[SW] Precache partial error (ignored):', err);
       });
@@ -25,7 +44,7 @@ self.addEventListener('activate', (event) => {
     caches.keys().then((keys) => {
       return Promise.all(
         keys.map((key) => {
-          if (key !== CACHE_NAME) {
+          if (key !== STATIC_CACHE_NAME && key !== RUNTIME_CACHE_NAME) {
             return caches.delete(key);
           }
         })
@@ -35,62 +54,104 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
+// Support client control messages (force activate / clear caches)
+self.addEventListener('message', (event) => {
+  if (!event.data || typeof event.data !== 'object') return;
+  if (event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  } else if (event.data.type === 'CLEAR_CACHES') {
+    event.waitUntil(
+      caches.keys().then((keys) => Promise.all(keys.map((k) => caches.delete(k))))
+    );
+  }
+});
+
 // Fetch Event - Stale-while-revalidate for static assets, network-first for /api/
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // Skip non-GET requests or browser extension URLs
-  if (event.request.method !== 'GET' || !url.protocol.startsWith('http')) {
+  // Skip non-GET requests, external protocols, or Vite dev/HMR endpoints
+  if (
+    event.request.method !== 'GET' ||
+    !url.protocol.startsWith('http') ||
+    url.pathname.startsWith('/@vite') ||
+    url.pathname.startsWith('/@react-refresh') ||
+    url.pathname.startsWith('/src/') ||
+    url.pathname.startsWith('/node_modules/')
+  ) {
     return;
   }
 
-  // API Requests: Network First, fallback to cached or offline JSON
+  // API Requests: Network First, fallback to cached GET response or structured offline JSON
   if (url.pathname.startsWith('/api/')) {
     event.respondWith(
-      fetch(event.request)
-        .then((response) => {
-          return response;
-        })
-        .catch(() => {
-          return caches.match(event.request).then((cached) => {
-            if (cached) return cached;
-            return new Response(
-              JSON.stringify({
-                offline: true,
-                message: '無塵室離線保護中，請查閱離線晶圓知識庫'
-              }),
-              {
-                headers: { 'Content-Type': 'application/json' }
-              }
-            );
-          });
-        })
+      (async () => {
+        try {
+          const networkResponse = await fetch(event.request);
+          return networkResponse;
+        } catch {
+          const cached = await caches.match(event.request);
+          if (cached) return cached;
+          return new Response(
+            JSON.stringify({
+              offline: true,
+              message: '無塵室離線保護中，請查閱離線晶圓知識庫'
+            }),
+            {
+              status: 503,
+              headers: { 'Content-Type': 'application/json' }
+            }
+          );
+        }
+      })()
     );
     return;
   }
 
-  // Static Assets / Navigation: Stale-While-Revalidate
-  event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      const fetchPromise = fetch(event.request)
-        .then((networkResponse) => {
+  // HTML Navigation Requests: Network First (prevents stale chunk hashes after upgrades) with offline fallback
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      (async () => {
+        try {
+          const networkResponse = await fetch(event.request);
           if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
+            const cache = await caches.open(STATIC_CACHE_NAME);
+            cache.put('/index.html', networkResponse.clone()).catch(() => {});
+          }
+          return networkResponse;
+        } catch {
+          return (
+            (await caches.match(event.request)) ||
+            (await caches.match('/index.html')) ||
+            (await caches.match('/'))
+          );
+        }
+      })()
+    );
+    return;
+  }
+
+  // Static Assets (Hashed JS/CSS/Fonts/Icons): Stale-While-Revalidate
+  event.respondWith(
+    (async () => {
+      const cachedResponse = await caches.match(event.request);
+      const fetchPromise = fetch(event.request)
+        .then(async (networkResponse) => {
+          if (
+            networkResponse &&
+            networkResponse.status === 200 &&
+            networkResponse.type === 'basic'
+          ) {
             const responseToCache = networkResponse.clone();
-            caches.open(CACHE_NAME).then((cache) => {
-              cache.put(event.request, responseToCache);
-            });
+            const cache = await caches.open(RUNTIME_CACHE_NAME);
+            await cache.put(event.request, responseToCache);
+            trimRuntimeCache(RUNTIME_CACHE_NAME, MAX_RUNTIME_CACHE_ENTRIES);
           }
           return networkResponse;
         })
-        .catch(() => {
-          // If offline and request is HTML navigation, return cached index
-          if (event.request.mode === 'navigate') {
-            return caches.match('/index.html') || cachedResponse;
-          }
-          return cachedResponse;
-        });
+        .catch(async () => cachedResponse);
 
       return cachedResponse || fetchPromise;
-    })
+    })()
   );
 });

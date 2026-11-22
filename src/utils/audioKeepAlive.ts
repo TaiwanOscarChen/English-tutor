@@ -3,9 +3,11 @@
  * Prevents mobile browsers and in-car Bluetooth connections from sleeping or suspending SpeechSynthesis.
  */
 
-let keepAliveCtx: AudioContext | null = null;
+import { getSharedAudioContext, ensureSharedAudioContextRunning } from './audioEffects';
+
 let keepAliveOsc: OscillatorNode | null = null;
 let keepAliveGain: GainNode | null = null;
+let keepAliveBoundCtx: AudioContext | null = null;
 let silentAudioEl: HTMLAudioElement | null = null;
 
 // 1-second silent WAV base64 encoded audio track
@@ -13,6 +15,7 @@ const SILENT_WAV_BASE64 = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAE
 
 /**
  * Starts a silent Web Audio & AudioElement keep-alive channel to keep mobile OS audio pipeline active
+ * Reuses the app's single shared AudioContext so long sessions never hit iOS/Safari hardware AudioContext limits.
  */
 export function startAudioKeepAlive(): void {
   if (typeof window === 'undefined') return;
@@ -22,6 +25,7 @@ export function startAudioKeepAlive(): void {
     if (!silentAudioEl) {
       silentAudioEl = new Audio(SILENT_WAV_BASE64);
       silentAudioEl.loop = true;
+      (silentAudioEl as any).playsInline = true;
       silentAudioEl.volume = 0.001; // nearly inaudible
     }
     if (silentAudioEl.paused) {
@@ -33,30 +37,41 @@ export function startAudioKeepAlive(): void {
     console.warn("Silent audio element init notice:", err);
   }
 
-  // 2. Web Audio API Oscillator (Secondary for browser audio hardware lock)
+  // 2. Web Audio API Oscillator on Shared Context (Secondary for browser audio hardware lock)
   try {
-    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioCtx) return;
+    const sharedCtx = getSharedAudioContext();
+    if (!sharedCtx) return;
 
-    if (!keepAliveCtx || keepAliveCtx.state === 'closed') {
-      keepAliveCtx = new AudioCtx();
+    if (sharedCtx.state === 'suspended' || (sharedCtx.state as string) === 'interrupted') {
+      ensureSharedAudioContextRunning(600).catch(() => {});
     }
 
-    if (keepAliveCtx.state === 'suspended') {
-      keepAliveCtx.resume().catch(() => {});
+    // 若共享 AudioContext 已因系統重置而重建，先清理舊的 oscillator 參照
+    if (keepAliveOsc && keepAliveBoundCtx !== sharedCtx) {
+      try {
+        keepAliveOsc.stop();
+        keepAliveOsc.disconnect();
+      } catch {}
+      try {
+        keepAliveGain?.disconnect();
+      } catch {}
+      keepAliveOsc = null;
+      keepAliveGain = null;
+      keepAliveBoundCtx = null;
     }
 
     if (!keepAliveOsc) {
-      keepAliveOsc = keepAliveCtx.createOscillator();
-      keepAliveGain = keepAliveCtx.createGain();
+      keepAliveOsc = sharedCtx.createOscillator();
+      keepAliveGain = sharedCtx.createGain();
+      keepAliveBoundCtx = sharedCtx;
 
       // Ultra-low frequency 30Hz sine wave at near-zero gain (0.0001)
       keepAliveOsc.type = 'sine';
-      keepAliveOsc.frequency.setValueAtTime(30, keepAliveCtx.currentTime);
-      keepAliveGain.gain.setValueAtTime(0.0001, keepAliveCtx.currentTime);
+      keepAliveOsc.frequency.setValueAtTime(30, sharedCtx.currentTime);
+      keepAliveGain.gain.setValueAtTime(0.0001, sharedCtx.currentTime);
 
       keepAliveOsc.connect(keepAliveGain);
-      keepAliveGain.connect(keepAliveCtx.destination);
+      keepAliveGain.connect(sharedCtx.destination);
 
       keepAliveOsc.start();
     }
@@ -66,7 +81,7 @@ export function startAudioKeepAlive(): void {
 }
 
 /**
- * Stops the silent keep-alive channel
+ * Stops the silent keep-alive channel without suspending the shared AudioContext used by TTS/SFX
  */
 export function stopAudioKeepAlive(): void {
   try {
@@ -87,9 +102,7 @@ export function stopAudioKeepAlive(): void {
       keepAliveGain.disconnect();
       keepAliveGain = null;
     }
-    if (keepAliveCtx && keepAliveCtx.state !== 'closed') {
-      keepAliveCtx.suspend().catch(() => {});
-    }
+    keepAliveBoundCtx = null;
   } catch (err) {
     console.warn("Audio Keep-Alive stop notice:", err);
   }

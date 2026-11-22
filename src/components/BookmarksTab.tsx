@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Lesson } from '../types';
 import { LessonCard } from './LessonCard';
-import { Bookmark, Search, Copy, CheckCircle2, Sparkles, Play, Pause, ArrowRight } from 'lucide-react';
-import { speakEnglish, cancelSpeech } from '../utils/speech';
+import { Bookmark, Search, Copy, CheckCircle2, Sparkles, Play, Pause, ArrowRight, Car } from 'lucide-react';
+import { speakEnglish, cancelSpeech, globalAudioScheduler, SpeechSequenceStep } from '../utils/speech';
 import { playClickSound } from '../utils/audioEffects';
+import { SrsCardState, MemoryRating, isLessonDueForReview } from '../utils/srsScheduler';
 
 interface BookmarksTabProps {
   bookmarkedLessons: Lesson[];
@@ -13,6 +14,9 @@ interface BookmarksTabProps {
   onMarkVisited?: (id: string) => void;
   onOpenVoiceSettings?: () => void;
   onNavigateDaily?: () => void;
+  srsMap?: Record<string, SrsCardState>;
+  onRateMemory?: (lessonId: string, rating: MemoryRating) => void;
+  onSendToDriveBookmarks?: () => void;
 }
 
 export const BookmarksTab: React.FC<BookmarksTabProps> = ({
@@ -22,24 +26,62 @@ export const BookmarksTab: React.FC<BookmarksTabProps> = ({
   visitedLessonIds = [],
   onMarkVisited,
   onOpenVoiceSettings,
-  onNavigateDaily
+  onNavigateDaily,
+  srsMap,
+  onRateMemory,
+  onSendToDriveBookmarks
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
+  const [srsFilter, setSrsFilter] = useState<'all' | 'due' | 'mastered'>('all');
+  const [slowPlayMode, setSlowPlayMode] = useState(false);
   const [copiedAll, setCopiedAll] = useState(false);
   const [isPlayingAll, setIsPlayingAll] = useState(false);
   const [currentPlayIndex, setCurrentPlayIndex] = useState<number | null>(null);
   const isPlayingAllRef = useRef<boolean>(false);
+  const isStartingPlayAllRef = useRef<boolean>(false);
+  const playSessionRef = useRef<number>(0);
+  const playTimerRef = useRef<number | null>(null);
+  const copyTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
-    return () => {
+    const handleSpeechInterrupted = () => {
+      if (isStartingPlayAllRef.current) return;
       if (isPlayingAllRef.current) {
+        playSessionRef.current += 1;
         isPlayingAllRef.current = false;
-        cancelSpeech();
+        setIsPlayingAll(false);
+        setCurrentPlayIndex(null);
       }
+    };
+    window.addEventListener('fse-speech-interrupted', handleSpeechInterrupted);
+    return () => {
+      window.removeEventListener('fse-speech-interrupted', handleSpeechInterrupted);
+      playSessionRef.current += 1;
+      isPlayingAllRef.current = false;
+      if (playTimerRef.current !== null) {
+        window.clearTimeout(playTimerRef.current);
+      }
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+      cancelSpeech();
     };
   }, []);
 
+  const dueCount = srsMap
+    ? bookmarkedLessons.filter((l) => isLessonDueForReview(l.id, srsMap)).length
+    : bookmarkedLessons.length;
+  const masteredCount = srsMap
+    ? bookmarkedLessons.filter((l) => (srsMap[l.id]?.repetitions || 0) >= 2).length
+    : 0;
+
   const filteredLessons = bookmarkedLessons.filter((l) => {
+    if (srsFilter === 'due' && srsMap && !isLessonDueForReview(l.id, srsMap)) {
+      return false;
+    }
+    if (srsFilter === 'mastered' && srsMap && (srsMap[l.id]?.repetitions || 0) < 2) {
+      return false;
+    }
     if (!searchTerm.trim()) return true;
     const term = searchTerm.toLowerCase();
     return (
@@ -56,15 +98,27 @@ export const BookmarksTab: React.FC<BookmarksTabProps> = ({
     const text = bookmarkedLessons
       .map((l, i) => `【${i + 1}. ${l.scenario}】\n英文：${l.english_sentence}\n中文：${l.chinese_translation}\n諧音：${l.phonetic_taiwan || '無'}\n技巧：${l.memory_trick}\n`)
       .join('\n------------------------\n\n');
-    navigator.clipboard.writeText(text);
-    setCopiedAll(true);
-    setTimeout(() => setCopiedAll(false), 2500);
+    try {
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        navigator.clipboard.writeText(text).catch(() => {});
+      }
+      setCopiedAll(true);
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+      copyTimerRef.current = window.setTimeout(() => setCopiedAll(false), 2500);
+    } catch {}
   };
 
-  const handlePlayAllSequence = async () => {
+  const handlePlayAllSequence = () => {
     playClickSound();
     if (isPlayingAllRef.current) {
+      playSessionRef.current += 1;
       isPlayingAllRef.current = false;
+      if (playTimerRef.current !== null) {
+        window.clearTimeout(playTimerRef.current);
+        playTimerRef.current = null;
+      }
       cancelSpeech();
       setIsPlayingAll(false);
       setCurrentPlayIndex(null);
@@ -73,27 +127,40 @@ export const BookmarksTab: React.FC<BookmarksTabProps> = ({
 
     if (filteredLessons.length === 0) return;
 
+    const sessionId = ++playSessionRef.current;
     isPlayingAllRef.current = true;
     setIsPlayingAll(true);
 
-    for (let i = 0; i < filteredLessons.length; i++) {
-      if (!isPlayingAllRef.current) break;
-      setCurrentPlayIndex(i);
-      const lesson = filteredLessons[i];
-      await new Promise<void>((resolve) => {
-        speakEnglish(
-          lesson.english_sentence,
-          speechSpeed,
-          () => {
-            setTimeout(resolve, 650);
-          }
-        );
-      });
-    }
+    const effectiveRate = slowPlayMode ? 0.7 : speechSpeed;
 
-    isPlayingAllRef.current = false;
-    setIsPlayingAll(false);
-    setCurrentPlayIndex(null);
+    isStartingPlayAllRef.current = true;
+    try {
+      cancelSpeech();
+      const steps: SpeechSequenceStep[] = filteredLessons.map((lesson, idx) => ({
+        text: lesson.english_sentence,
+        lang: 'en-US',
+        rate: effectiveRate,
+        delayAfterMs: 600,
+        onStepStart: () => {
+          if (playSessionRef.current !== sessionId) return;
+          setCurrentPlayIndex(idx);
+        }
+      }));
+
+      globalAudioScheduler.scheduleSequence(steps, {
+        interrupt: false,
+        isCancelled: () => !isPlayingAllRef.current || playSessionRef.current !== sessionId,
+        onSequenceEnd: () => {
+          if (playSessionRef.current === sessionId) {
+            isPlayingAllRef.current = false;
+            setIsPlayingAll(false);
+            setCurrentPlayIndex(null);
+          }
+        }
+      });
+    } finally {
+      isStartingPlayAllRef.current = false;
+    }
   };
 
   return (
@@ -106,12 +173,15 @@ export const BookmarksTab: React.FC<BookmarksTabProps> = ({
             <Bookmark className="w-5 h-5 fill-slate-950 text-slate-950" />
           </div>
           <div>
-            <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-baseline gap-2 flex-wrap">
               <h2 className="text-base sm:text-lg font-black text-slate-100">
                 個人晶圓收藏錦囊庫
               </h2>
-              <span className="px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-800 text-[10px] font-mono font-bold">
-                已收藏 {bookmarkedLessons.length} 句
+              <span className="text-cyan-300 text-xs font-mono font-bold tabular-nums">
+                · 已收藏 {bookmarkedLessons.length} 句
+                {srsMap && bookmarkedLessons.length > 0
+                  ? ` · 已記熟 ${bookmarkedLessons.filter((l) => (srsMap[l.id]?.repetitions || 0) >= 2).length} 句`
+                  : ''}
               </span>
             </div>
             <p className="text-xs text-slate-400 font-medium">
@@ -123,11 +193,45 @@ export const BookmarksTab: React.FC<BookmarksTabProps> = ({
         {/* Action Controls */}
         {bookmarkedLessons.length > 0 && (
           <div className="flex items-center gap-2 self-stretch sm:self-auto shrink-0 flex-wrap">
+            {onSendToDriveBookmarks && (
+              <button
+                type="button"
+                onClick={() => {
+                  playClickSound();
+                  onSendToDriveBookmarks();
+                }}
+                className="min-h-[38px] px-3 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-sm whitespace-nowrap"
+                title="切換到隨身聽並僅針對收藏金句進行背景連播"
+              >
+                <Car className="w-3.5 h-3.5 shrink-0" />
+                <span>隨身聽連播收藏</span>
+              </button>
+            )}
+
             <button
+              type="button"
+              aria-pressed={slowPlayMode}
+              onClick={() => {
+                playClickSound();
+                setSlowPlayMode((prev) => !prev);
+              }}
+              className={`min-h-[38px] px-2.5 py-1.5 rounded-xl text-xs font-mono font-bold transition-colors cursor-pointer border whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
+                slowPlayMode
+                  ? 'bg-cyan-400 text-slate-950 border-cyan-300 font-black'
+                  : 'bg-slate-800 hover:bg-slate-700 text-amber-300 border-slate-700'
+              }`}
+              title="切換連續播放語速 (標準 vs 0.7x 慢速)"
+            >
+              {slowPlayMode ? '連播: 0.7x' : '連播: 標準'}
+            </button>
+
+            <button
+              type="button"
+              aria-pressed={isPlayingAll}
               onClick={handlePlayAllSequence}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm ${
+              className={`min-h-[38px] px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm tabular-nums whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${
                 isPlayingAll
-                  ? 'bg-amber-400 text-slate-950 ring-2 ring-amber-400/50 font-black animate-pulse'
+                  ? 'bg-amber-400 text-slate-950 ring-2 ring-amber-400/50 font-black'
                   : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
               }`}
               title="依序連續朗讀所有收藏金句"
@@ -137,8 +241,9 @@ export const BookmarksTab: React.FC<BookmarksTabProps> = ({
             </button>
 
             <button
+              type="button"
               onClick={handleCopyAll}
-              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
+              className="min-h-[38px] px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
               title="匯出並複製所有收藏金句到剪貼簿"
             >
               {copiedAll ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-amber-400" />}
@@ -148,24 +253,60 @@ export const BookmarksTab: React.FC<BookmarksTabProps> = ({
         )}
       </div>
 
-      {/* Search Input Filter */}
+      {/* Search & SRS Filter Controls */}
       {bookmarkedLessons.length > 0 && (
-        <div className="relative w-full">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="搜尋收藏句型：輸入情境、英文關鍵字、中文意思或諧音..."
-            className="w-full pl-10 pr-4 py-2 bg-slate-900/90 border border-slate-800 rounded-xl text-xs sm:text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-cyan-400 transition-all font-sans"
-          />
-          {searchTerm && (
-            <button
-              onClick={() => setSearchTerm('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-white cursor-pointer"
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full">
+          <div className="relative flex-1">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="搜尋收藏句型：輸入情境、英文關鍵字、中文意思或諧音..."
+              className="w-full pl-10 pr-8 py-2 bg-slate-900/90 border border-slate-800 rounded-xl text-xs sm:text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-cyan-400 transition-all font-sans"
+            />
+            {searchTerm && (
+              <button
+                type="button"
+                aria-label="清除搜尋條件"
+                onClick={() => setSearchTerm('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-white cursor-pointer"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+
+          {srsMap && (
+            <div
+              role="tablist"
+              aria-label="收藏複習狀態篩選"
+              className="flex items-center gap-1 bg-slate-900/90 border border-slate-800 p-1 rounded-xl text-xs shrink-0 self-start sm:self-auto"
             >
-              ✕
-            </button>
+              {[
+                { id: 'all' as const, label: `全部 (${bookmarkedLessons.length})` },
+                { id: 'due' as const, label: `待複習 (${dueCount})` },
+                { id: 'mastered' as const, label: `已記熟 (${masteredCount})` },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={srsFilter === tab.id}
+                  onClick={() => {
+                    playClickSound();
+                    setSrsFilter(tab.id);
+                  }}
+                  className={`px-2.5 py-1.5 rounded-lg font-mono font-bold tabular-nums whitespace-nowrap transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
+                    srsFilter === tab.id
+                      ? 'bg-cyan-400 text-slate-950 font-black'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
           )}
         </div>
       )}
@@ -211,8 +352,8 @@ export const BookmarksTab: React.FC<BookmarksTabProps> = ({
           {filteredLessons.map((lesson, idx) => (
             <div
               key={lesson.id || idx}
-              className={`transition-all ${
-                currentPlayIndex === idx ? 'ring-2 ring-cyan-400/80 rounded-2xl scale-[1.005]' : ''
+              className={`transition-colors ${
+                currentPlayIndex === idx ? 'ring-2 ring-cyan-400/80 rounded-2xl' : ''
               }`}
             >
               <LessonCard
@@ -223,6 +364,9 @@ export const BookmarksTab: React.FC<BookmarksTabProps> = ({
                 isVisited={visitedLessonIds.includes(lesson.id)}
                 onMarkVisited={onMarkVisited}
                 onOpenVoiceSettings={onOpenVoiceSettings}
+                disableGlobalShortcuts={true}
+                srsState={srsMap?.[lesson.id]}
+                onRateMemory={onRateMemory}
               />
             </div>
           ))}

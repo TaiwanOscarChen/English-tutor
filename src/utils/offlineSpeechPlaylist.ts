@@ -6,9 +6,15 @@
 
 import { FAB_VOCAB } from '../data/fabVocab';
 import { VocabItem } from '../types';
-import { speakEnglish, speakChinese, resetSpeechEngine } from './speech';
+import {
+  resetSpeechEngine,
+  prepareTaiwanPhoneticForSpeech,
+  globalAudioScheduler,
+  unlockAudioContext,
+  ensureSpeechEngineInitialized
+} from './speech';
 import { getExampleTranslation } from './exampleSentenceTranslator';
-import { playClickSound, playLaserScanSound, playWaferSnapSound } from './audioEffects';
+import { playClickSound, playWaferSnapSound } from './audioEffects';
 
 export type OfflinePlaylistPhase = 'idle' | 'word' | 'taiwan_trick' | 'example' | 'interval' | 'paused';
 
@@ -86,6 +92,8 @@ class OfflineSpeechPlaylistEngine {
   private sleepTimerSecondsLeft: number = 0;
   private playedCount: number = 0;
   private isCancelled: boolean = false;
+  private sessionEpoch: number = 0;
+  private offlineAutoStartTimer: ReturnType<typeof setTimeout> | null = null;
   private reviewedVocabIds: string[] = [];
   private listeners: Set<(state: OfflinePlaylistState) => void> = new Set();
 
@@ -233,6 +241,7 @@ class OfflineSpeechPlaylistEngine {
     }
 
     this.stop(false);
+    const epoch = ++this.sessionEpoch;
     this.isCancelled = false;
     this.isPlaying = true;
     this.isPaused = false;
@@ -244,165 +253,223 @@ class OfflineSpeechPlaylistEngine {
     }
 
     this.notify();
-    this.playCurrentStep();
+    this.playCurrentStep(epoch);
   }
 
-  /**
-   * 核心循環播放邏輯
-   */
-  private playCurrentStep() {
-    if (!this.isPlaying || this.isPaused || this.isCancelled) return;
-
-    if (this.currentIndex >= this.activeItems.length) {
-      // 播放清單結束，自動循環從第 1 首開始
-      this.currentIndex = 0;
-    }
-
-    const item = this.activeItems[this.currentIndex];
-    if (!item) {
-      this.stop();
-      return;
-    }
-
-    // Step 1: 英文單字朗讀
-    this.currentPhase = 'word';
-    this.notify();
-
-    const speed = this.config.speechSpeed || 0.95;
-
-    // 播放英文單字 (可依設定重複 1 或 2 次)
-    const speakWordTimes = this.config.repeatCount;
-    let wordSpoken = 0;
-
-    const playWordLoop = () => {
-      if (!this.isPlaying || this.isPaused || this.isCancelled) return;
-
-      wordSpoken++;
-      speakEnglish(
-        item.word,
-        speed,
-        () => {
-          if (!this.isPlaying || this.isPaused || this.isCancelled) return;
-
-          if (wordSpoken < speakWordTimes) {
-            // 重複朗讀單字，間隔 350ms
-            this.timerRef = setTimeout(() => {
-              playWordLoop();
-            }, 350);
-          } else {
-            // 前往 Step 2: 諧音口訣與中文翻譯 (若開啟)
-            this.playTaiwanTrickStep(item);
-          }
-        },
-        1.0,
-        150,
-        true // 清空舊發音佇列
-      );
-    };
-
-    playWordLoop();
+  private isEpochActive(epoch: number): boolean {
+    return epoch === this.sessionEpoch && this.isPlaying && !this.isPaused && !this.isCancelled;
   }
 
-  /**
-   * Step 2: 播放台味諧音記憶法與中文意思
-   */
-  private playTaiwanTrickStep(item: VocabItem) {
-    if (!this.isPlaying || this.isPaused || this.isCancelled) return;
-
-    if (!this.config.includeMemoryTrick) {
-      this.playExampleStep(item);
-      return;
-    }
-
-    this.currentPhase = 'taiwan_trick';
-    this.notify();
-
-    const textToSpeak = `${item.translation}。口訣：${item.memoryTrick || item.taiwanPhonetic}`;
-
-    speakChinese(
-      textToSpeak,
-      Math.max(0.9, this.config.speechSpeed || 0.95),
-      () => {
-        if (!this.isPlaying || this.isPaused || this.isCancelled) return;
-        this.playExampleStep(item);
-      },
-      1.0,
-      250,
-      false
-    );
-  }
-
-  /**
-   * Step 3: 播放晶圓廠實戰例句 (英文 + 中文意思)
-   */
-  private playExampleStep(item: VocabItem) {
-    if (!this.isPlaying || this.isPaused || this.isCancelled) return;
-
-    if (!this.config.includeExample || !item.exampleSentence) {
-      this.finishCurrentItem();
-      return;
-    }
-
-    this.currentPhase = 'example';
-    this.notify();
-
-    const speed = Math.max(0.85, (this.config.speechSpeed || 0.95) * 0.95);
-    const zhMeaning = item.exampleTranslation || item.exampleSentenceZh || getExampleTranslation(item.exampleSentence, item.word);
-
-    speakEnglish(
-      item.exampleSentence,
-      speed,
-      () => {
-        if (!this.isPlaying || this.isPaused || this.isCancelled) return;
-
-        // 若啟用口訣與中文朗讀，接著朗讀例句中文意思
-        if (this.config.includeMemoryTrick && zhMeaning) {
-          speakChinese(
-            `例句意思：${zhMeaning}`,
-            Math.max(0.9, this.config.speechSpeed || 0.95),
-            () => {
-              if (!this.isPlaying || this.isPaused || this.isCancelled) return;
-              this.finishCurrentItem();
-            },
-            1.0,
-            200,
-            false
-          );
-        } else {
-          this.finishCurrentItem();
-        }
-      },
-      1.0,
-      250,
-      false
-    );
-  }
-
-  /**
-   * Step 4: 當前單字播放結束，等待間隔後自動前進至下一詞
-   */
-  private finishCurrentItem() {
-    if (!this.isPlaying || this.isPaused || this.isCancelled) return;
-
-    this.currentPhase = 'interval';
-    this.playedCount++;
-    this.notify();
-
-    const delayMs = Math.max(400, (this.config.intervalSeconds || 2.0) * 1000);
-
-    this.timerRef = setTimeout(() => {
-      if (!this.isPlaying || this.isPaused || this.isCancelled) return;
-
-      if (this.config.playMode === 'loop_single') {
-        // 單詞精聽循環模式：維持原索引重複播放
-        this.notify();
-        this.playCurrentStep();
-      } else {
-        this.currentIndex = (this.currentIndex + 1) % this.activeItems.length;
-        this.notify();
-        this.playCurrentStep();
+  private waitWithEpoch(ms: number, epoch: number): Promise<boolean> {
+    return new Promise((resolve) => {
+      if (!this.isEpochActive(epoch)) {
+        resolve(false);
+        return;
       }
-    }, delayMs);
+      if (ms <= 0) {
+        resolve(true);
+        return;
+      }
+      if (this.timerRef) {
+        clearTimeout(this.timerRef);
+        this.timerRef = null;
+      }
+      this.timerRef = setTimeout(() => {
+        this.timerRef = null;
+        resolve(this.isEpochActive(epoch));
+      }, ms);
+    });
+  }
+
+  private async speakQueuedStep(
+    text: string,
+    lang: 'en-US' | 'zh-TW',
+    speed: number,
+    bufferAfterMs: number,
+    epoch: number
+  ): Promise<boolean> {
+    if (!this.isEpochActive(epoch)) return false;
+    if (!text || !text.trim()) return true;
+
+    let hadError = false;
+    try {
+      await globalAudioScheduler.enqueue(
+        text,
+        lang,
+        speed,
+        bufferAfterMs,
+        () => !this.isEpochActive(epoch),
+        1.0,
+        undefined,
+        undefined,
+        () => {
+          hadError = true;
+        }
+      );
+    } catch {
+      hadError = true;
+    }
+
+    if (!this.isEpochActive(epoch)) return false;
+    return !hadError;
+  }
+
+  /**
+   * 核心循環播放邏輯（採用 Epoch 守衛之 async 序列化迴圈，具備單步錯誤隔離與自動恢復機制，絕不因單次 TTS 異常導致整串清單靜默停擺）
+   */
+  private playCurrentStep(epoch: number = this.sessionEpoch) {
+    if (!this.isEpochActive(epoch)) return;
+    this.runSequentialPlaylistLoop(epoch).catch((err) => {
+      console.warn("[OfflineSpeechPlaylist] Unexpected loop error:", err);
+      if (this.isEpochActive(epoch)) {
+        this.stop();
+      }
+    });
+  }
+
+  private async runSequentialPlaylistLoop(epoch: number): Promise<void> {
+    unlockAudioContext();
+    await ensureSpeechEngineInitialized(800).catch(() => {});
+    if (!this.isEpochActive(epoch)) return;
+
+    let consecutiveErrors = 0;
+
+    while (this.isEpochActive(epoch)) {
+      if (this.activeItems.length === 0) {
+        this.stop();
+        return;
+      }
+      if (this.currentIndex >= this.activeItems.length) {
+        this.currentIndex = 0;
+      }
+
+      const item = this.activeItems[this.currentIndex];
+      if (!item) {
+        this.stop();
+        return;
+      }
+
+      let itemSucceededSteps = 0;
+      let itemFailedSteps = 0;
+
+      // Step 1: 英文單字朗讀（可依設定重複 1~3 次）
+      this.currentPhase = 'word';
+      this.notify();
+
+      const speed = this.config.speechSpeed || 0.95;
+      const speakWordTimes = this.config.repeatCount;
+
+      for (let wordSpoken = 1; wordSpoken <= speakWordTimes; wordSpoken++) {
+        if (!this.isEpochActive(epoch)) return;
+        const wordSpeed = wordSpoken === 1 ? Math.max(0.7, Number((speed * 0.85).toFixed(2))) : speed;
+        const ok = await this.speakQueuedStep(item.word, 'en-US', wordSpeed, 150, epoch);
+        if (!this.isEpochActive(epoch)) return;
+        if (ok) itemSucceededSteps++;
+        else itemFailedSteps++;
+
+        if (wordSpoken < speakWordTimes) {
+          const stillActive = await this.waitWithEpoch(320, epoch);
+          if (!stillActive) return;
+        }
+      }
+
+      // Step 2: 簡潔中文釋義 + 原速英文單字強化
+      if (this.config.includeMemoryTrick) {
+        if (!this.isEpochActive(epoch)) return;
+        this.currentPhase = 'taiwan_trick';
+        this.notify();
+
+        const phoneticText = prepareTaiwanPhoneticForSpeech(item.taiwanPhonetic || '');
+        const textToSpeak = item.translation
+          ? item.translation
+          : (phoneticText || item.memoryTrick || '');
+
+        if (textToSpeak) {
+          const zhOk = await this.speakQueuedStep(
+            textToSpeak,
+            'zh-TW',
+            Math.max(0.95, speed),
+            200,
+            epoch
+          );
+          if (!this.isEpochActive(epoch)) return;
+          if (zhOk) itemSucceededSteps++;
+          else itemFailedSteps++;
+        }
+
+        const enReinforceOk = await this.speakQueuedStep(item.word, 'en-US', speed, 180, epoch);
+        if (!this.isEpochActive(epoch)) return;
+        if (enReinforceOk) itemSucceededSteps++;
+        else itemFailedSteps++;
+      }
+
+      // Step 3: 晶圓廠實戰例句（慢速英文 ➔ 中文理解 ➔ 原速英文強化定型）
+      if (this.config.includeExample && item.exampleSentence) {
+        if (!this.isEpochActive(epoch)) return;
+        this.currentPhase = 'example';
+        this.notify();
+
+        const slowSpeed = Math.max(0.7, Number((speed * 0.85).toFixed(2)));
+        const zhMeaning =
+          item.exampleTranslation ||
+          item.exampleSentenceZh ||
+          getExampleTranslation(item.exampleSentence, item.word);
+
+        const slowOk = await this.speakQueuedStep(item.exampleSentence, 'en-US', slowSpeed, 200, epoch);
+        if (!this.isEpochActive(epoch)) return;
+        if (slowOk) itemSucceededSteps++;
+        else itemFailedSteps++;
+
+        if (this.config.includeMemoryTrick && zhMeaning) {
+          const exZhOk = await this.speakQueuedStep(
+            zhMeaning,
+            'zh-TW',
+            Math.max(0.95, speed),
+            180,
+            epoch
+          );
+          if (!this.isEpochActive(epoch)) return;
+          if (exZhOk) itemSucceededSteps++;
+          else itemFailedSteps++;
+        }
+
+        const normalOk = await this.speakQueuedStep(item.exampleSentence, 'en-US', speed, 220, epoch);
+        if (!this.isEpochActive(epoch)) return;
+        if (normalOk) itemSucceededSteps++;
+        else itemFailedSteps++;
+      }
+
+      // 若整題所有步驟都失敗，觸發短暫退避冷卻並自動重置音訊上下文後繼續前進，避免無限快速空轉
+      if (itemSucceededSteps === 0 && itemFailedSteps > 0) {
+        consecutiveErrors++;
+        unlockAudioContext();
+        const recoveryCooldownMs = Math.min(3000, 600 * consecutiveErrors);
+        const stillActive = await this.waitWithEpoch(recoveryCooldownMs, epoch);
+        if (!stillActive) return;
+        if (consecutiveErrors >= 5) {
+          // 連續 5 題皆完全無法發聲（例如設備完全靜音或無網路無離線語音），安全暫停避免耗電
+          this.pause();
+          return;
+        }
+      } else {
+        consecutiveErrors = 0;
+      }
+
+      // Step 4: 當前單字播放結束，等待間隔後自動前進至下一詞
+      if (!this.isEpochActive(epoch)) return;
+      this.currentPhase = 'interval';
+      this.playedCount++;
+      this.notify();
+
+      const delayMs = Math.max(400, (this.config.intervalSeconds || 2.0) * 1000);
+      const stillActive = await this.waitWithEpoch(delayMs, epoch);
+      if (!stillActive) return;
+
+      if (this.config.playMode !== 'loop_single') {
+        this.currentIndex = (this.currentIndex + 1) % this.activeItems.length;
+      }
+      this.notify();
+    }
   }
 
   /**
@@ -410,6 +477,7 @@ class OfflineSpeechPlaylistEngine {
    */
   public pause() {
     if (!this.isPlaying) return;
+    this.sessionEpoch++;
     this.isPaused = true;
     this.currentPhase = 'paused';
     if (this.timerRef) {
@@ -425,9 +493,10 @@ class OfflineSpeechPlaylistEngine {
    */
   public resume() {
     if (!this.isPlaying || !this.isPaused) return;
+    const epoch = ++this.sessionEpoch;
     this.isPaused = false;
     this.notify();
-    this.playCurrentStep();
+    this.playCurrentStep(epoch);
   }
 
   /**
@@ -449,16 +518,18 @@ class OfflineSpeechPlaylistEngine {
   public next() {
     if (this.activeItems.length === 0) return;
     playClickSound();
+    const epoch = ++this.sessionEpoch;
     if (this.timerRef) {
       clearTimeout(this.timerRef);
       this.timerRef = null;
     }
     resetSpeechEngine();
     this.currentIndex = (this.currentIndex + 1) % this.activeItems.length;
+    this.isCancelled = false;
     this.isPaused = false;
     this.isPlaying = true;
     this.notify();
-    this.playCurrentStep();
+    this.playCurrentStep(epoch);
   }
 
   /**
@@ -467,26 +538,33 @@ class OfflineSpeechPlaylistEngine {
   public prev() {
     if (this.activeItems.length === 0) return;
     playClickSound();
+    const epoch = ++this.sessionEpoch;
     if (this.timerRef) {
       clearTimeout(this.timerRef);
       this.timerRef = null;
     }
     resetSpeechEngine();
     this.currentIndex = (this.currentIndex - 1 + this.activeItems.length) % this.activeItems.length;
+    this.isCancelled = false;
     this.isPaused = false;
     this.isPlaying = true;
     this.notify();
-    this.playCurrentStep();
+    this.playCurrentStep(epoch);
   }
 
   /**
    * 停止播放清單
    */
   public stop(notify: boolean = true) {
+    this.sessionEpoch++;
     this.isCancelled = true;
     this.isPlaying = false;
     this.isPaused = false;
     this.currentPhase = 'idle';
+    if (this.offlineAutoStartTimer) {
+      clearTimeout(this.offlineAutoStartTimer);
+      this.offlineAutoStartTimer = null;
+    }
     if (this.timerRef) {
       clearTimeout(this.timerRef);
       this.timerRef = null;
@@ -507,9 +585,13 @@ class OfflineSpeechPlaylistEngine {
    */
   public handleOfflineDetected() {
     if (this.config.autoStartOnOffline && !this.isPlaying) {
+      if (this.offlineAutoStartTimer) {
+        clearTimeout(this.offlineAutoStartTimer);
+      }
       // 稍微延遲 600ms 讓用戶看到離線提示後平順啟動
-      setTimeout(() => {
-        if (!this.isPlaying) {
+      this.offlineAutoStartTimer = setTimeout(() => {
+        this.offlineAutoStartTimer = null;
+        if (!this.isPlaying && this.config.autoStartOnOffline) {
           this.start(0);
         }
       }, 600);

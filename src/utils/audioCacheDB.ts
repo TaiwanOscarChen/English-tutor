@@ -80,11 +80,11 @@ export function getAudioCacheDB(): Promise<IDBDatabase | null> {
 
 /**
  * 產生一致性音訊指紋鍵值 (Cache Key)
+ * 統一以標準母語原音鍵值儲存，由前端透過 preservesPitch=true 進行無損變速，讓單一快取支援所有語速 (0.7x ~ 1.2x)
  */
-export function generateAudioCacheKey(text: string, lang: string, rate: number): string {
+export function generateAudioCacheKey(text: string, lang: string, _rate: number = 1.0): string {
   const normText = text.trim().toLowerCase().replace(/\s+/g, ' ');
-  const normRate = Math.round(rate * 100) / 100;
-  return `${lang}__${normRate}__${normText}`;
+  return `${lang}__v6_studio_clean__${normText}`;
 }
 
 /**
@@ -98,19 +98,18 @@ export async function getCachedAudioSnippet(
   const db = await getAudioCacheDB();
   if (!db) return null;
 
-  const key = generateAudioCacheKey(text, lang, rate);
+  const primaryKey = generateAudioCacheKey(text, lang, rate);
 
   return new Promise((resolve) => {
     try {
       const tx = db.transaction(STORE_NAME, 'readonly');
       const store = tx.objectStore(STORE_NAME);
-      const request = store.get(key);
+      const request = store.get(primaryKey);
 
       request.onsuccess = () => {
         const result = request.result as CachedAudioSnippet | undefined;
-        if (result) {
-          // 異步遞增命中次數
-          updateHitCount(key);
+        if (result && result.audioBlob && result.audioBlob.size > 64) {
+          updateHitCount(primaryKey);
           resolve(result);
         } else {
           resolve(null);
@@ -127,7 +126,7 @@ export async function getCachedAudioSnippet(
 }
 
 /**
- * 將音訊片段存入 IndexedDB 快取
+ * 將音訊片段存入 IndexedDB 快取（保留既有 audioBlob，避免無 Blob 寫入覆蓋實體音檔）
  */
 export async function saveAudioSnippetToCache(
   text: string,
@@ -139,26 +138,42 @@ export async function saveAudioSnippetToCache(
   if (!db) return false;
 
   const key = generateAudioCacheKey(text, lang, rate);
-  const snippet: CachedAudioSnippet = {
-    id: key,
-    text,
-    lang,
-    rate,
-    audioBlob: data?.audioBlob,
-    base64Audio: data?.base64Audio,
-    durationMs: data?.durationMs,
-    timestamp: Date.now(),
-    hitCount: 1
-  };
 
   return new Promise((resolve) => {
     try {
       const tx = db.transaction(STORE_NAME, 'readwrite');
       const store = tx.objectStore(STORE_NAME);
-      const request = store.put(snippet);
+      const getReq = store.get(key);
 
-      request.onsuccess = () => resolve(true);
-      request.onerror = () => resolve(false);
+      getReq.onsuccess = () => {
+        const existing = getReq.result as CachedAudioSnippet | undefined;
+        const mergedBlob = data?.audioBlob ?? existing?.audioBlob;
+        const mergedBase64 = data?.base64Audio ?? existing?.base64Audio;
+
+        // 若既無新音訊 Blob 也無舊音訊 Blob，不寫入空殼紀錄
+        if (!mergedBlob && !mergedBase64) {
+          resolve(false);
+          return;
+        }
+
+        const snippet: CachedAudioSnippet = {
+          id: key,
+          text,
+          lang,
+          rate,
+          audioBlob: mergedBlob,
+          base64Audio: mergedBase64,
+          durationMs: data?.durationMs ?? existing?.durationMs,
+          timestamp: Date.now(),
+          hitCount: (existing?.hitCount || 0) + 1
+        };
+
+        const putReq = store.put(snippet);
+        putReq.onsuccess = () => resolve(true);
+        putReq.onerror = () => resolve(false);
+      };
+
+      getReq.onerror = () => resolve(false);
     } catch {
       resolve(false);
     }
@@ -189,28 +204,111 @@ async function updateHitCount(key: string): Promise<void> {
 }
 
 /**
- * 取得快取統計資訊 (總數量與磁碟占用概況)
+ * 取得快取統計資訊 (總數量、可播放音訊片段清單與磁碟占用概況)
  */
-export async function getAudioCacheStats(): Promise<{ count: number; totalEstimatedBytes: number }> {
+export async function getAudioCacheStats(): Promise<{
+  count: number;
+  playableBlobCount: number;
+  totalEstimatedBytes: number;
+  cachedIds: string[];
+}> {
   const db = await getAudioCacheDB();
-  if (!db) return { count: 0, totalEstimatedBytes: 0 };
+  if (!db) return { count: 0, playableBlobCount: 0, totalEstimatedBytes: 0, cachedIds: [] };
 
   return new Promise((resolve) => {
     try {
       const tx = db.transaction(STORE_NAME, 'readonly');
       const store = tx.objectStore(STORE_NAME);
-      const countReq = store.count();
+      const cursorReq = store.openCursor();
+      let count = 0;
+      let playableBlobCount = 0;
+      let totalEstimatedBytes = 0;
+      const cachedIds: string[] = [];
 
-      countReq.onsuccess = () => {
-        const count = countReq.result || 0;
-        resolve({ count, totalEstimatedBytes: count * 1024 });
+      cursorReq.onsuccess = (event: Event) => {
+        const cursor = (event.target as IDBRequest<IDBCursorWithValue | null>).result;
+        if (cursor) {
+          count++;
+          const val = cursor.value as CachedAudioSnippet | undefined;
+          if (val?.audioBlob && val.audioBlob.size > 64) {
+            playableBlobCount++;
+            totalEstimatedBytes += val.audioBlob.size;
+            if (val.id) cachedIds.push(val.id);
+          } else {
+            totalEstimatedBytes += 256;
+          }
+          cursor.continue();
+        } else {
+          resolve({ count, playableBlobCount, totalEstimatedBytes, cachedIds });
+        }
       };
 
-      countReq.onerror = () => {
-        resolve({ count: 0, totalEstimatedBytes: 0 });
+      cursorReq.onerror = () => {
+        resolve({ count: 0, playableBlobCount: 0, totalEstimatedBytes: 0, cachedIds: [] });
       };
     } catch {
-      resolve({ count: 0, totalEstimatedBytes: 0 });
+      resolve({ count: 0, playableBlobCount: 0, totalEstimatedBytes: 0, cachedIds: [] });
+    }
+  });
+}
+
+/**
+ * 智慧空間清理：移除最久未存取且命中率最低的指定比例音檔，釋放手機空間同時保留常用無塵室音訊
+ */
+export async function pruneOldestAudioCache(fractionToFree: number = 0.3): Promise<{
+  deletedCount: number;
+  freedBytes: number;
+}> {
+  const db = await getAudioCacheDB();
+  if (!db) return { deletedCount: 0, freedBytes: 0 };
+
+  const clampedFraction = Math.min(0.8, Math.max(0.1, fractionToFree));
+
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction(STORE_NAME, 'readwrite');
+      const store = tx.objectStore(STORE_NAME);
+      const entries: Array<{ id: string; timestamp: number; hitCount: number; size: number }> = [];
+      const cursorReq = store.openCursor();
+
+      cursorReq.onsuccess = (event: Event) => {
+        const cursor = (event.target as IDBRequest<IDBCursorWithValue | null>).result;
+        if (cursor) {
+          const val = cursor.value as CachedAudioSnippet | undefined;
+          if (val?.id) {
+            entries.push({
+              id: val.id,
+              timestamp: Number(val.timestamp) || 0,
+              hitCount: Number(val.hitCount) || 0,
+              size: val.audioBlob?.size || 256,
+            });
+          }
+          cursor.continue();
+        } else {
+          if (entries.length === 0) {
+            resolve({ deletedCount: 0, freedBytes: 0 });
+            return;
+          }
+          // Sort oldest & lowest hitCount first
+          entries.sort((a, b) => {
+            if (a.timestamp !== b.timestamp) return a.timestamp - b.timestamp;
+            return a.hitCount - b.hitCount;
+          });
+          const toRemoveCount = Math.max(1, Math.floor(entries.length * clampedFraction));
+          const targets = entries.slice(0, toRemoveCount);
+          let freedBytes = 0;
+          for (const target of targets) {
+            store.delete(target.id);
+            freedBytes += target.size;
+          }
+          tx.oncomplete = () => resolve({ deletedCount: targets.length, freedBytes });
+          tx.onerror = () => resolve({ deletedCount: 0, freedBytes: 0 });
+        }
+      };
+
+      cursorReq.onerror = () => resolve({ deletedCount: 0, freedBytes: 0 });
+    } catch {
+      resolve({ deletedCount: 0, freedBytes: 0 });
     }
   });
 }

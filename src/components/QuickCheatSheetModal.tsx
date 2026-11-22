@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   X,
@@ -233,6 +233,30 @@ export const QuickCheatSheetModal: React.FC<QuickCheatSheetModalProps> = ({
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [activeSpeed, setActiveSpeed] = useState<number>(initialSpeed || 0.85);
+  const copyTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current);
+        copyTimerRef.current = null;
+      }
+      cancelSpeech();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        cancelSpeech();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -258,23 +282,42 @@ export const QuickCheatSheetModal: React.FC<QuickCheatSheetModalProps> = ({
     playLaserScanSound();
     cancelSpeech();
     setPlayingId(phrase.id);
-    speakEnglish(phrase.english, activeSpeed);
-    setTimeout(() => {
-      setPlayingId(null);
-    }, 2400);
+    speakEnglish(phrase.english, activeSpeed, () => {
+      setPlayingId((prev) => (prev === phrase.id ? null : prev));
+    });
   };
 
   const handleCopy = (text: string, id: string) => {
-    navigator.clipboard.writeText(text);
-    playSuccessChime();
-    setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 2000);
+    try {
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        navigator.clipboard.writeText(text).catch(() => {});
+      }
+      playSuccessChime();
+      setCopiedId(id);
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+      copyTimerRef.current = window.setTimeout(() => {
+        setCopiedId((prev) => (prev === id ? null : prev));
+        copyTimerRef.current = null;
+      }, 2000);
+    } catch {}
   };
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/85 backdrop-blur-md">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="無塵室即時口報發聲板 & 金句快查"
+        onClick={() => {
+          cancelSpeech();
+          onClose();
+        }}
+        className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/85 backdrop-blur-md"
+      >
         <motion.div
+          onClick={(e) => e.stopPropagation()}
           initial={{ opacity: 0, scale: 0.95, y: 15 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95, y: 15 }}
@@ -285,15 +328,15 @@ export const QuickCheatSheetModal: React.FC<QuickCheatSheetModalProps> = ({
           <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between shrink-0">
             <div className="flex items-center gap-2.5">
               <div className="p-2 bg-gradient-to-br from-amber-400 to-yellow-500 rounded-xl text-slate-950 font-black shadow-md shrink-0 ring-2 ring-amber-400/30">
-                <Radio className="w-5 h-5 text-slate-950 animate-pulse" />
+                <Radio className="w-5 h-5 text-slate-950" />
               </div>
               <div>
                 <div className="flex items-center gap-2">
                   <h3 className="text-sm sm:text-base font-black text-white">
                     無塵室即時口報發聲板 & 金句快查
                   </h3>
-                  <span className="px-2 py-0.5 rounded-full bg-cyan-950 border border-cyan-800 text-[10px] font-mono text-cyan-300 font-bold hidden sm:inline">
-                    20 組極速廣播
+                  <span className="text-[11px] font-mono text-cyan-300 font-bold hidden sm:inline tabular-nums">
+                    · 20 組極速廣播
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-400 font-medium">
@@ -306,11 +349,13 @@ export const QuickCheatSheetModal: React.FC<QuickCheatSheetModalProps> = ({
               {/* View Mode Toggle */}
               <div className="flex items-center bg-slate-900 border border-slate-800 p-0.5 rounded-xl text-xs">
                 <button
+                  type="button"
+                  aria-pressed={viewMode === 'soundboard'}
                   onClick={() => {
                     playClickSound();
                     setViewMode('soundboard');
                   }}
-                  className={`px-2.5 py-1 rounded-lg font-bold flex items-center gap-1 transition-all cursor-pointer ${
+                  className={`px-2.5 py-1 rounded-lg font-bold flex items-center gap-1 transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${
                     viewMode === 'soundboard'
                       ? 'bg-amber-400 text-slate-950 font-black shadow'
                       : 'text-slate-400 hover:text-white'
@@ -320,11 +365,13 @@ export const QuickCheatSheetModal: React.FC<QuickCheatSheetModalProps> = ({
                   <span className="hidden sm:inline">音效板</span>
                 </button>
                 <button
+                  type="button"
+                  aria-pressed={viewMode === 'list'}
                   onClick={() => {
                     playClickSound();
                     setViewMode('list');
                   }}
-                  className={`px-2.5 py-1 rounded-lg font-bold flex items-center gap-1 transition-all cursor-pointer ${
+                  className={`px-2.5 py-1 rounded-lg font-bold flex items-center gap-1 transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${
                     viewMode === 'list'
                       ? 'bg-amber-400 text-slate-950 font-black shadow'
                       : 'text-slate-400 hover:text-white'
@@ -336,8 +383,13 @@ export const QuickCheatSheetModal: React.FC<QuickCheatSheetModalProps> = ({
               </div>
 
               <button
-                onClick={onClose}
-                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors cursor-pointer"
+                type="button"
+                aria-label="關閉發聲板"
+                onClick={() => {
+                  cancelSpeech();
+                  onClose();
+                }}
+                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -361,20 +413,22 @@ export const QuickCheatSheetModal: React.FC<QuickCheatSheetModalProps> = ({
               {/* Speed Buttons */}
               <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 px-1.5 py-1 rounded-xl shrink-0">
                 <span className="text-[10px] text-slate-400 font-bold px-1 hidden md:inline">語速:</span>
-                {[0.65, 0.85, 1.0].map((spd) => (
+                {[0.7, 0.85, 1.0].map((spd) => (
                   <button
                     key={spd}
+                    type="button"
+                    aria-pressed={activeSpeed === spd}
                     onClick={() => {
                       playClickSound();
                       setActiveSpeed(spd);
                     }}
-                    className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold transition-all cursor-pointer ${
+                    className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold tabular-nums transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
                       activeSpeed === spd
                         ? 'bg-cyan-400 text-slate-950 font-black'
                         : 'text-slate-400 hover:text-white'
                     }`}
                   >
-                    {spd === 0.65 ? '0.6x 慢' : spd === 0.85 ? '0.8x 標' : '1.0x 快'}
+                    {spd === 0.7 ? '0.7x 慢' : spd === 0.85 ? '0.85x 標' : '1.0x 快'}
                   </button>
                 ))}
               </div>
@@ -385,11 +439,13 @@ export const QuickCheatSheetModal: React.FC<QuickCheatSheetModalProps> = ({
               {tagOptions.map((t) => (
                 <button
                   key={t.id}
+                  type="button"
+                  aria-pressed={selectedTag === t.id}
                   onClick={() => {
                     playClickSound();
                     setSelectedTag(t.id);
                   }}
-                  className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold whitespace-nowrap transition-all cursor-pointer ${
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold whitespace-nowrap transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${
                     selectedTag === t.id
                       ? 'bg-amber-400 text-slate-950 font-black shadow-sm'
                       : 'bg-slate-900 border border-slate-800 text-slate-300 hover:bg-slate-800'
@@ -412,10 +468,18 @@ export const QuickCheatSheetModal: React.FC<QuickCheatSheetModalProps> = ({
                   return (
                     <motion.div
                       key={phrase.id}
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`朗讀金句：${phrase.english}`}
+                      whileTap={{ scale: 0.99 }}
                       onClick={() => handlePlay(phrase)}
-                      className={`p-3 rounded-xl border-2 transition-all cursor-pointer flex flex-col justify-between gap-2 relative overflow-hidden group shadow-md ${
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          handlePlay(phrase);
+                        }
+                      }}
+                      className={`p-3 rounded-xl border-2 transition-all cursor-pointer flex flex-col justify-between gap-2 relative overflow-hidden group shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
                         isPlaying
                           ? 'bg-cyan-950/90 border-cyan-400 ring-2 ring-cyan-400/50 text-cyan-200'
                           : phrase.soundboardTag === 'alarm'
@@ -450,11 +514,13 @@ export const QuickCheatSheetModal: React.FC<QuickCheatSheetModalProps> = ({
                         </span>
 
                         <button
+                          type="button"
+                          aria-label={`複製 ${phrase.english}`}
                           onClick={(e) => {
                             e.stopPropagation();
                             handleCopy(phrase.english, phrase.id);
                           }}
-                          className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-white transition-colors"
+                          className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
                           title="複製英文"
                         >
                           {isCopied ? (
@@ -480,14 +546,14 @@ export const QuickCheatSheetModal: React.FC<QuickCheatSheetModalProps> = ({
                         <div className="flex flex-col gap-1">
                           {phraseKK && (
                             <div className="flex items-start gap-1.5 bg-cyan-950/50 border border-cyan-500/30 rounded-md px-1.5 py-0.5">
-                              <span className="px-1 py-0.2 rounded bg-cyan-500/30 text-cyan-200 font-black text-[9px] shrink-0">KK音標</span>
+                              <span className="px-1 py-0.5 rounded bg-cyan-500/30 text-cyan-200 font-black text-[9px] shrink-0">KK音標</span>
                               <span className="text-cyan-200 font-mono font-bold tracking-wider break-words flex-1 leading-snug">
                                 {phraseKK}
                               </span>
                             </div>
                           )}
                           <div className="flex items-start gap-1.5 bg-indigo-950/50 border border-indigo-500/30 rounded-md px-1.5 py-0.5">
-                            <span className="px-1 py-0.2 rounded bg-indigo-500/30 text-indigo-200 font-black text-[9px] shrink-0">注音</span>
+                            <span className="px-1 py-0.5 rounded bg-indigo-500/30 text-indigo-200 font-black text-[9px] shrink-0">注音</span>
                             <span className="text-yellow-300 font-mono font-bold tracking-wider break-words flex-1 leading-snug">
                               {(() => {
                                 const zh = convertPhoneticToZhuyin(phrase.phonetic);
@@ -497,7 +563,7 @@ export const QuickCheatSheetModal: React.FC<QuickCheatSheetModalProps> = ({
                             </span>
                           </div>
                           <div className="flex items-start gap-1.5 bg-emerald-950/40 border border-emerald-500/30 rounded-md px-1.5 py-0.5">
-                            <span className="px-1 py-0.2 rounded bg-emerald-500/30 text-emerald-200 font-black text-[9px] shrink-0">諧音</span>
+                            <span className="px-1 py-0.5 rounded bg-emerald-500/30 text-emerald-200 font-black text-[9px] shrink-0">諧音</span>
                             <span className="text-emerald-200 font-mono font-bold tracking-wider break-words flex-1 leading-snug">
                               {(() => {
                                 const clean = phrase.phonetic.trim().replace(/^【\s*|\s*】$/g, '').trim();
@@ -507,7 +573,7 @@ export const QuickCheatSheetModal: React.FC<QuickCheatSheetModalProps> = ({
                           </div>
                         </div>
                         <div className="flex items-center justify-end gap-1 font-bold text-cyan-400 pt-0.5">
-                          <Volume2 className={`w-3.5 h-3.5 ${isPlaying ? 'animate-bounce text-cyan-300' : ''}`} />
+                          <Volume2 className={`w-3.5 h-3.5 ${isPlaying ? 'text-cyan-300' : ''}`} />
                           <span className="text-[9px] font-mono">點擊發聲</span>
                         </div>
                       </div>
@@ -555,6 +621,7 @@ export const QuickCheatSheetModal: React.FC<QuickCheatSheetModalProps> = ({
 
                         <div className="flex items-center gap-1.5 shrink-0">
                           <button
+                            type="button"
                             onClick={() => handlePlay(phrase)}
                             className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 transition-colors cursor-pointer border border-slate-700"
                             title="朗讀英文"
@@ -562,6 +629,22 @@ export const QuickCheatSheetModal: React.FC<QuickCheatSheetModalProps> = ({
                             <Volume2 className="w-3.5 h-3.5" />
                           </button>
                           <button
+                            type="button"
+                            onClick={() => {
+                              playLaserScanSound();
+                              cancelSpeech();
+                              setPlayingId(phrase.id);
+                              speakEnglish(phrase.english, 0.7, () => {
+                                setPlayingId((prev) => (prev === phrase.id ? null : prev));
+                              });
+                            }}
+                            className="px-2 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 text-[10px] font-mono font-bold transition-colors cursor-pointer"
+                            title="0.7x 慢速清晰朗讀"
+                          >
+                            0.7x
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => handleCopy(phrase.english, phrase.id)}
                             className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors cursor-pointer border border-slate-700"
                             title="複製句型"
@@ -577,12 +660,12 @@ export const QuickCheatSheetModal: React.FC<QuickCheatSheetModalProps> = ({
 
                       <div className="space-y-1 pt-0.5">
                         {phraseKK && (
-                          <div className="p-2 rounded-lg bg-cyan-950/70 border-l-2 border-cyan-400 text-xs font-mono font-black text-cyan-200 tracking-wider break-words max-w-full flex items-start gap-2">
+                          <div className="p-2 rounded-lg bg-cyan-950/70 border border-cyan-500/30 text-xs font-mono font-black text-cyan-200 tracking-wider break-words max-w-full flex items-start gap-2">
                             <span className="px-1.5 py-0.5 rounded bg-cyan-500/30 text-cyan-200 text-[10px] font-bold shrink-0">KK音標</span>
                             <span className="leading-relaxed">{phraseKK}</span>
                           </div>
                         )}
-                        <div className="p-2 rounded-lg bg-indigo-950/80 border-l-2 border-indigo-400 text-xs font-mono font-black text-yellow-300 tracking-wider break-words max-w-full flex items-start gap-2">
+                        <div className="p-2 rounded-lg bg-indigo-950/80 border border-indigo-500/30 text-xs font-mono font-black text-yellow-300 tracking-wider break-words max-w-full flex items-start gap-2">
                           <span className="px-1.5 py-0.5 rounded bg-indigo-500/30 text-indigo-200 text-[10px] font-bold shrink-0">注音</span>
                           <span className="leading-relaxed">
                             {(() => {
@@ -592,7 +675,7 @@ export const QuickCheatSheetModal: React.FC<QuickCheatSheetModalProps> = ({
                             })()}
                           </span>
                         </div>
-                        <div className="p-2 rounded-lg bg-emerald-950/60 border-l-2 border-emerald-400 text-xs font-mono font-black text-emerald-200 tracking-wider break-words max-w-full flex items-start gap-2">
+                        <div className="p-2 rounded-lg bg-emerald-950/60 border border-emerald-500/30 text-xs font-mono font-black text-emerald-200 tracking-wider break-words max-w-full flex items-start gap-2">
                           <span className="px-1.5 py-0.5 rounded bg-emerald-500/30 text-emerald-200 text-[10px] font-bold shrink-0">諧音</span>
                           <span className="leading-relaxed">
                             {(() => {
@@ -611,12 +694,16 @@ export const QuickCheatSheetModal: React.FC<QuickCheatSheetModalProps> = ({
 
           {/* Footer */}
           <div className="p-3 bg-slate-950 border-t border-slate-800 flex justify-between items-center shrink-0 text-xs text-slate-400">
-            <span className="text-[11px] font-mono">
-              ⚡ 點擊任意音效磚即發出清晰廣播 | 共 {filteredPhrases.length} 條核心口報
+            <span className="text-[11px] font-mono tabular-nums">
+              點擊任意音效磚即發出清晰廣播 · 共 {filteredPhrases.length} 條核心口報
             </span>
             <button
-              onClick={onClose}
-              className="px-4 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold cursor-pointer transition-colors text-xs"
+              type="button"
+              onClick={() => {
+                cancelSpeech();
+                onClose();
+              }}
+              className="px-4 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold cursor-pointer transition-colors text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
             >
               關閉視窗
             </button>

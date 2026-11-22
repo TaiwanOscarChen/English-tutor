@@ -52,16 +52,16 @@ export const OfflineSyncPromptBar: React.FC<OfflineSyncPromptBarProps> = ({
           >
             <div className="flex items-center gap-2.5 min-w-0">
               <div className="p-1.5 rounded-xl bg-emerald-500/20 text-emerald-300 shrink-0 border border-emerald-400/40">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 animate-bounce" />
+                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
               </div>
               <div className="min-w-0">
-                <div className="font-black text-emerald-300 flex items-center gap-1.5 flex-wrap text-xs sm:text-sm">
+                <div className="font-black text-emerald-300 flex items-center gap-1.5 flex-wrap text-xs sm:text-sm tabular-nums">
                   <span>離線學習進度已成功同步！</span>
                   <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-emerald-950 text-emerald-300 border border-emerald-500/40">
                     +{syncSummary.xpGained} XP
                   </span>
                 </div>
-                <p className="text-[11px] text-emerald-200/80 truncate font-mono">
+                <p className="text-[11px] text-emerald-200/80 truncate font-mono tabular-nums">
                   已累計 {syncSummary.vocabCount} 個單字、{syncSummary.speechCount} 次口說評測至總成就地圖
                 </p>
               </div>
@@ -81,14 +81,12 @@ export const OfflineSyncPromptBar: React.FC<OfflineSyncPromptBarProps> = ({
             <div className="flex items-center gap-2.5 min-w-0 flex-1">
               <div className="relative p-2 rounded-xl bg-cyan-500/15 border border-cyan-400/30 text-cyan-300 shrink-0">
                 <CloudUpload className="w-4 h-4 text-cyan-400" />
-                <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping" />
-                <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-amber-400" />
               </div>
 
               <div className="min-w-0">
-                <div className="font-black text-slate-100 flex items-center gap-1.5 flex-wrap text-xs sm:text-[13px]">
+                <div className="font-black text-slate-100 flex items-center gap-1.5 flex-wrap text-xs sm:text-[13px] tabular-nums">
                   <span>設備已恢復連線</span>
-                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-amber-400/20 text-amber-300 border border-amber-400/40 font-bold">
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-400/20 text-amber-300 border border-amber-400/40 font-bold">
                     {pendingStats?.totalPending || 1} 筆離線進度待同步
                   </span>
                 </div>
@@ -118,19 +116,22 @@ export const OfflineSyncPromptBar: React.FC<OfflineSyncPromptBarProps> = ({
             {/* Right: Sync Action Button & Dismiss */}
             <div className="flex items-center gap-1.5 shrink-0 justify-end">
               <button
+                type="button"
                 id="offline-sync-execute-btn"
                 onClick={onSync}
                 disabled={isSyncing}
-                className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-cyan-400 to-emerald-400 hover:from-cyan-300 hover:to-emerald-300 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-md active:scale-95 transition-all cursor-pointer disabled:opacity-50"
+                className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-cyan-400 to-emerald-400 hover:from-cyan-300 hover:to-emerald-300 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-md active:scale-95 transition-all cursor-pointer disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300"
               >
-                <RefreshCw className={`w-3.5 h-3.5 text-slate-950 ${isSyncing ? 'animate-spin' : ''}`} />
+                <RefreshCw className={`w-3.5 h-3.5 text-slate-950 ${isSyncing ? 'motion-safe:animate-spin' : ''}`} />
                 <span>{isSyncing ? '同步累積中...' : '自動同步進度'}</span>
               </button>
 
               <button
+                type="button"
                 id="offline-sync-dismiss-btn"
+                aria-label="稍後再同步"
                 onClick={onDismiss}
-                className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition-colors cursor-pointer"
+                className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
                 title="稍後再同步"
               >
                 <X className="w-3.5 h-3.5" />

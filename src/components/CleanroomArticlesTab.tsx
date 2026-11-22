@@ -51,52 +51,133 @@ export const CleanroomArticlesTab: React.FC<CleanroomArticlesTabProps> = ({
   const [isNarratingAll, setIsNarratingAll] = useState<boolean>(false);
   const [currentNarratingIdx, setCurrentNarratingIdx] = useState<number | null>(null);
   const [expandedSectionIdx, setExpandedSectionIdx] = useState<number | null>(null);
-  const { showBookmarkToast } = useToast();
+  const { showBookmarkToast, showCopyToast } = useToast();
+  const narrateSessionRef = React.useRef<number>(0);
+  const narrateTimerRef = React.useRef<any>(null);
+  const isStartingNarrateRef = React.useRef<boolean>(false);
+  const generateAbortRef = React.useRef<AbortController | null>(null);
+  const generateTimerRef = React.useRef<number | null>(null);
+  const isMountedRef = React.useRef<boolean>(true);
+
+  const stopNarrateAll = () => {
+    narrateSessionRef.current += 1;
+    if (narrateTimerRef.current) {
+      clearTimeout(narrateTimerRef.current);
+      narrateTimerRef.current = null;
+    }
+    cancelSpeech();
+    setIsNarratingAll(false);
+    setCurrentNarratingIdx(null);
+  };
+
+  React.useEffect(() => {
+    isMountedRef.current = true;
+    const handleSpeechInterrupted = () => {
+      if (isStartingNarrateRef.current) return;
+      narrateSessionRef.current += 1;
+      if (narrateTimerRef.current) {
+        clearTimeout(narrateTimerRef.current);
+        narrateTimerRef.current = null;
+      }
+      setIsNarratingAll(false);
+      setCurrentNarratingIdx(null);
+    };
+    window.addEventListener('fse-speech-interrupted', handleSpeechInterrupted);
+    return () => {
+      window.removeEventListener('fse-speech-interrupted', handleSpeechInterrupted);
+      isMountedRef.current = false;
+      narrateSessionRef.current += 1;
+      if (narrateTimerRef.current) clearTimeout(narrateTimerRef.current);
+      if (generateTimerRef.current !== null) {
+        window.clearTimeout(generateTimerRef.current);
+        generateTimerRef.current = null;
+      }
+      generateAbortRef.current?.abort();
+      cancelSpeech();
+    };
+  }, []);
+
+  React.useEffect(() => {
+    if (!activeArticle) return;
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        stopNarrateAll();
+        setActiveArticle(null);
+      }
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [activeArticle]);
 
   const handleToggleNarrateAll = () => {
     if (isNarratingAll) {
-      cancelSpeech();
-      setIsNarratingAll(false);
-      setCurrentNarratingIdx(null);
+      stopNarrateAll();
       return;
     }
 
     if (!activeArticle || !activeArticle.contentSections || activeArticle.contentSections.length === 0) return;
 
-    setIsNarratingAll(true);
-    let sectionIdx = 0;
+    isStartingNarrateRef.current = true;
+    try {
+      cancelSpeech();
+      const mySession = ++narrateSessionRef.current;
+      setIsNarratingAll(true);
+      let sectionIdx = 0;
 
-    const playNext = () => {
-      if (sectionIdx >= activeArticle.contentSections.length) {
-        setIsNarratingAll(false);
-        setCurrentNarratingIdx(null);
-        return;
-      }
-      setCurrentNarratingIdx(sectionIdx);
-      const text = activeArticle.contentSections[sectionIdx].englishText;
-      speakEnglish(text, speechSpeed, () => {
-        sectionIdx++;
-        setTimeout(playNext, 600);
-      });
-    };
+      const playNext = () => {
+        if (narrateSessionRef.current !== mySession) return;
+        if (sectionIdx >= activeArticle.contentSections.length) {
+          setIsNarratingAll(false);
+          setCurrentNarratingIdx(null);
+          return;
+        }
+        setCurrentNarratingIdx(sectionIdx);
+        const text = activeArticle.contentSections[sectionIdx].englishText;
+        isStartingNarrateRef.current = true;
+        try {
+          speakEnglish(text, speechSpeed, () => {
+            if (narrateSessionRef.current !== mySession) return;
+            sectionIdx++;
+            narrateTimerRef.current = setTimeout(playNext, 500);
+          });
+        } finally {
+          isStartingNarrateRef.current = false;
+        }
+      };
 
-    playNext();
+      playNext();
+    } finally {
+      isStartingNarrateRef.current = false;
+    }
   };
 
   const categories = ['all', '週報導讀', '機台排除', '無塵室心法', '高頻交接', '晶圓趨勢'];
 
   const handleGenerateNewArticle = async () => {
     setIsGenerating(true);
+    generateAbortRef.current?.abort();
+    const controller = new AbortController();
+    generateAbortRef.current = controller;
+    if (generateTimerRef.current !== null) {
+      window.clearTimeout(generateTimerRef.current);
+    }
+    generateTimerRef.current = window.setTimeout(() => controller.abort(), 15000);
     try {
       const res = await fetch('/api/generate-article', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({
           category: selectedCategory !== 'all' ? selectedCategory : undefined,
           topicPrompt: '最新半導體無塵室設備工程實戰故障與極速對答案例'
         })
       });
       const data = await res.json();
+      if (!isMountedRef.current) return;
+      if (data && data.usePreset) {
+        showCopyToast(data.notice || '已載入預設晶圓實戰專題文章');
+        return;
+      }
       if (data && data.title) {
         const sanitizedArticle: Article = {
           ...data,
@@ -129,10 +210,18 @@ export const CleanroomArticlesTab: React.FC<CleanroomArticlesTabProps> = ({
         setActiveArticle(sanitizedArticle);
         onMarkArticleRead(sanitizedArticle.id);
       }
-    } catch (err) {
-      console.info("Notice generating article:", err);
+    } catch {
+      if (isMountedRef.current) {
+        showCopyToast('生成逾時或繁忙，請稍後再試或先瀏覽精選專題');
+      }
     } finally {
-      setIsGenerating(false);
+      if (generateTimerRef.current !== null) {
+        window.clearTimeout(generateTimerRef.current);
+        generateTimerRef.current = null;
+      }
+      if (isMountedRef.current) {
+        setIsGenerating(false);
+      }
     }
   };
 
@@ -164,18 +253,20 @@ export const CleanroomArticlesTab: React.FC<CleanroomArticlesTabProps> = ({
               return (
                 <button
                   key={cat}
+                  type="button"
+                  aria-pressed={isSelected}
                   onClick={() => {
                     playClickSound();
                     setSelectedCategory(cat);
                   }}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${
                     isSelected
                       ? 'bg-amber-400 text-slate-950 font-black shadow-sm ring-1 ring-amber-300'
                       : 'bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800 hover:bg-slate-800'
                   }`}
                 >
                   <span>{cat === 'all' ? '全部專題' : cat}</span>
-                  <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full font-bold ${
+                  <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded-md font-bold tabular-nums ${
                     isSelected ? 'bg-slate-950/20 text-slate-950' : 'bg-slate-800 text-slate-400'
                   }`}>
                     {count}
@@ -188,24 +279,27 @@ export const CleanroomArticlesTab: React.FC<CleanroomArticlesTabProps> = ({
           {/* Action buttons: AI Generate & Hide read */}
           <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
             <button
+              type="button"
               onClick={() => {
                 playClickSound();
                 handleGenerateNewArticle();
               }}
               disabled={isGenerating}
-              className="px-2.5 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/40 text-xs font-mono font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-xs active:scale-95 disabled:opacity-60"
+              className="px-2.5 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/40 text-xs font-mono font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-xs disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
               title="即時生成最新半導體無塵室實戰專題長文"
             >
-              <RefreshCw className={`w-3.5 h-3.5 text-amber-400 ${isGenerating ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`w-3.5 h-3.5 text-amber-400 ${isGenerating ? 'motion-safe:animate-spin' : ''}`} />
               <span>{isGenerating ? 'AI 撰寫中...' : 'AI 生成專題'}</span>
             </button>
 
             <button
+              type="button"
+              aria-pressed={hideRead}
               onClick={() => {
                 playClickSound();
                 setHideRead(!hideRead);
               }}
-              className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border flex items-center gap-1.5 ${
+              className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border flex items-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
                 hideRead
                   ? 'bg-cyan-950 border-cyan-500 text-cyan-300'
                   : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
@@ -257,16 +351,23 @@ export const CleanroomArticlesTab: React.FC<CleanroomArticlesTabProps> = ({
               })();
 
               return (
-                <motion.div
-                  layout
-                  whileHover={{ scale: 1.01, y: -2 }}
-                  whileTap={{ scale: 0.99 }}
+                <div
                   key={art.id}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`閱讀專題文章：${art.title}`}
                   onClick={() => {
                     setActiveArticle(art);
                     onMarkArticleRead(art.id);
                   }}
-                  className={`p-3 pb-0 rounded-xl border transition-all cursor-pointer flex flex-col justify-between space-y-1.5 relative overflow-hidden group shadow-sm ${
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setActiveArticle(art);
+                      onMarkArticleRead(art.id);
+                    }
+                  }}
+                  className={`p-3 pb-0 rounded-xl border transition-colors cursor-pointer flex flex-col justify-between space-y-1.5 relative overflow-hidden group shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
                     isActive
                       ? 'bg-slate-900 border-amber-400 shadow-md ring-1 ring-amber-400/40'
                       : 'bg-slate-900/90 border-slate-800 hover:border-cyan-500/60 hover:bg-slate-900/95 hover:shadow-cyan-950/20'
@@ -274,7 +375,7 @@ export const CleanroomArticlesTab: React.FC<CleanroomArticlesTabProps> = ({
                 >
                   {isRead && (
                     <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded bg-emerald-950/90 text-emerald-300 border border-emerald-700 text-[9px] font-black flex items-center gap-1 shadow-xs">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                      <Check className="w-2.5 h-2.5 text-emerald-400" />
                       <span>已讀</span>
                     </div>
                   )}
@@ -306,24 +407,27 @@ export const CleanroomArticlesTab: React.FC<CleanroomArticlesTabProps> = ({
 
                   {/* Docked Card Footer (完全貼緊底邊) */}
                   <div className="-mx-3 -mb-0 mt-auto px-3 py-1.5 bg-slate-950/90 border-t border-slate-800/80 rounded-b-xl flex items-center justify-between text-[10px] text-slate-400 font-mono">
-                    <span className="text-slate-400 break-words">{formattedDate}</span>
+                    <span className="text-slate-400 break-words tabular-nums">{formattedDate}</span>
                     <div className="flex items-center gap-1.5 shrink-0">
                       <span className="text-cyan-400 font-bold group-hover:translate-x-0.5 transition-transform text-[10px]">閱讀全文 →</span>
                       <button
+                        type="button"
+                        aria-pressed={isBookmarked}
+                        aria-label={isBookmarked ? `取消收藏 ${art.title}` : `加入收藏 ${art.title}`}
                         onClick={(e) => {
                           e.stopPropagation();
                           playClickSound();
                           onToggleBookmarkArticle(art.id);
                           showBookmarkToast(!isBookmarked, art.title);
                         }}
-                        className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-amber-400 cursor-pointer transition-colors"
+                        className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-amber-400 cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
                         title={isBookmarked ? "取消收藏" : "加入收藏"}
                       >
                         <Bookmark className={`w-3.5 h-3.5 ${isBookmarked ? 'fill-amber-400 text-amber-400' : ''}`} />
                       </button>
                     </div>
                   </div>
-                </motion.div>
+                </div>
               );
             })}
           </AnimatePresence>
@@ -333,8 +437,18 @@ export const CleanroomArticlesTab: React.FC<CleanroomArticlesTabProps> = ({
       {/* Active Article Full View Modal Dialog */}
       <AnimatePresence>
         {activeArticle && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={activeArticle.title}
+            onClick={() => {
+              stopNarrateAll();
+              setActiveArticle(null);
+            }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in"
+          >
             <motion.div
+              onClick={(e) => e.stopPropagation()}
               initial={{ opacity: 0, scale: 0.96, y: 8 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.96, y: 8 }}
@@ -342,13 +456,13 @@ export const CleanroomArticlesTab: React.FC<CleanroomArticlesTabProps> = ({
             >
               {/* Modal Close Button */}
               <button
+                type="button"
+                aria-label="關閉文章閱讀視窗"
                 onClick={() => {
-                  cancelSpeech();
-                  setIsNarratingAll(false);
-                  setCurrentNarratingIdx(null);
+                  stopNarrateAll();
                   setActiveArticle(null);
                 }}
-                className="absolute top-3.5 right-3.5 p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white cursor-pointer transition-colors z-10"
+                className="absolute top-3.5 right-3.5 p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white cursor-pointer transition-colors z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
                 title="關閉"
               >
                 <X className="w-5 h-5" />
@@ -397,10 +511,12 @@ export const CleanroomArticlesTab: React.FC<CleanroomArticlesTabProps> = ({
 
                   {/* Continuous Audio Narration Button */}
                   <button
+                    type="button"
+                    aria-pressed={isNarratingAll}
                     onClick={handleToggleNarrateAll}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-black flex items-center gap-1 transition-all shadow-xs cursor-pointer border ${
+                    className={`px-2.5 py-1 rounded-lg text-xs font-black flex items-center gap-1 transition-all shadow-xs cursor-pointer border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
                       isNarratingAll
-                        ? 'bg-rose-500 text-white border-rose-400 animate-pulse'
+                        ? 'bg-rose-500 text-white border-rose-400'
                         : 'bg-indigo-600 hover:bg-indigo-500 text-white border-indigo-400 shadow-indigo-500/20'
                     }`}
                   >
@@ -449,29 +565,34 @@ export const CleanroomArticlesTab: React.FC<CleanroomArticlesTabProps> = ({
 
                         <div className="flex items-center gap-1.5 shrink-0">
                           <button
-                            onClick={() => setExpandedSectionIdx(isSectionExpanded ? null : idx)}
-                            className={`px-2 py-1 rounded-lg text-[10px] font-mono font-bold transition-colors cursor-pointer border ${
-                              isSectionExpanded
-                                ? 'bg-cyan-500 text-slate-950 border-cyan-300'
-                                : 'bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 border-cyan-500/30'
-                            }`}
-                            title="展開零基礎逐字中文、KK音標、注音與諧音拆解"
+                            type="button"
+                            onClick={() => speakEnglish(sec.englishText, 0.7)}
+                            className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 cursor-pointer shrink-0 border border-slate-700 text-[10px] font-mono font-bold tabular-nums whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+                            title="0.7x 慢速朗讀"
                           >
-                            {isSectionExpanded ? '收合拆解' : '🔍 逐字拆解'}
+                            0.7x
                           </button>
                           <button
-                            onClick={() => speakEnglish(sec.englishText, 0.68)}
-                            className="px-2 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-[10px] font-mono font-bold transition-colors cursor-pointer"
-                            title="0.68x 慢速清晰朗讀"
-                          >
-                            🐢 慢讀
-                          </button>
-                          <button
+                            type="button"
                             onClick={() => speakEnglish(sec.englishText, speechSpeed)}
-                            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-300 cursor-pointer shrink-0 border border-slate-700 shadow-xs"
+                            className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-300 cursor-pointer shrink-0 border border-slate-700 text-[10px] font-mono font-bold flex items-center gap-1 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
                             title="正常語速朗讀"
                           >
                             <Volume2 className="w-3.5 h-3.5" />
+                            <span>朗讀</span>
+                          </button>
+                          <button
+                            type="button"
+                            aria-expanded={isSectionExpanded}
+                            onClick={() => setExpandedSectionIdx(isSectionExpanded ? null : idx)}
+                            className={`px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold transition-colors cursor-pointer border whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
+                              isSectionExpanded
+                                ? 'bg-cyan-400 text-slate-950 border-cyan-300 font-black'
+                                : 'bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 border-cyan-500/30'
+                            }`}
+                            title="展開逐字拆解與慢速朗讀"
+                          >
+                            {isSectionExpanded ? '收合 ▴' : '拆解 ▾'}
                           </button>
                         </div>
                       </div>
@@ -480,18 +601,18 @@ export const CleanroomArticlesTab: React.FC<CleanroomArticlesTabProps> = ({
                         <div className="bg-slate-900/90 rounded-lg border border-slate-800 p-2 space-y-1 text-[11px]">
                           {kkSec && (
                             <div className="flex items-center gap-1.5 min-w-0">
-                              <span className="px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-[9px] font-mono font-bold shrink-0">KK音標</span>
+                              <span className="px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-[9px] font-mono font-bold shrink-0">KK音標</span>
                               <span className="font-mono font-bold text-cyan-200 tracking-wider break-words flex-1">{kkSec}</span>
                             </div>
                           )}
                           {zhuyinSec && (
                             <div className="flex items-center gap-1.5 min-w-0">
-                              <span className="px-1.5 py-0.2 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 text-[9px] font-mono font-bold shrink-0">注音</span>
+                              <span className="px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 text-[9px] font-mono font-bold shrink-0">注音</span>
                               <span className="font-mono font-black text-amber-300 tracking-wider break-words flex-1">【 {zhuyinSec} 】</span>
                             </div>
                           )}
                           <div className="flex items-center gap-1.5 min-w-0">
-                            <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[9px] font-mono font-bold shrink-0">諧音</span>
+                            <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[9px] font-mono font-bold shrink-0">諧音</span>
                             <span className="font-sans font-bold text-emerald-300 tracking-wider break-words flex-1">【 {cleanPhonetic} 】</span>
                           </div>
                         </div>
@@ -536,13 +657,22 @@ export const CleanroomArticlesTab: React.FC<CleanroomArticlesTabProps> = ({
                               <span className="font-black text-amber-300 font-mono text-xs">{v.word}</span>
                               <span className="text-slate-100 font-bold font-sans ml-1.5">{v.translation}</span>
                             </div>
-                            <button
-                              onClick={() => speakEnglish(v.word, speechSpeed)}
-                              className="p-1 rounded bg-slate-800 text-cyan-400 hover:text-white cursor-pointer shrink-0"
-                              title="聽單字發音"
-                            >
-                              <Volume2 className="w-3 h-3" />
-                            </button>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button
+                                onClick={() => speakEnglish(v.word, 0.7)}
+                                className="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-amber-300 text-[10px] font-mono font-bold cursor-pointer tabular-nums"
+                                title="0.7x 慢速聽發音"
+                              >
+                                0.7x
+                              </button>
+                              <button
+                                onClick={() => speakEnglish(v.word, speechSpeed)}
+                                className="p-1 rounded bg-slate-800 text-cyan-400 hover:text-white cursor-pointer shrink-0"
+                                title="聽單字發音"
+                              >
+                                <Volume2 className="w-3 h-3" />
+                              </button>
+                            </div>
                           </div>
                           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] font-mono">
                             <span className="text-cyan-300">KK音標：{vKK}</span>

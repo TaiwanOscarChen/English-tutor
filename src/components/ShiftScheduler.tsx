@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ShiftSettings, ShiftType, Lesson } from '../types';
 import { PRESET_LESSONS } from '../data/presetLessons';
 import { Clock, Bell, BellOff, Volume2, Calendar, Zap, AlertTriangle, CheckCircle2, ArrowRight, Shield, Play, RotateCcw, ChevronRight } from 'lucide-react';
@@ -24,6 +24,16 @@ export const ShiftScheduler: React.FC<ShiftSchedulerProps> = ({
   const [isHandoverImminent, setIsHandoverImminent] = useState<boolean>(false);
   const [activeHandoverFlashcardIndex, setActiveHandoverFlashcardIndex] = useState<number>(0);
   const [showHandoverPracticeModal, setShowHandoverPracticeModal] = useState<boolean>(false);
+  const alertAudioTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (alertAudioTimerRef.current !== null) {
+        window.clearTimeout(alertAudioTimerRef.current);
+        alertAudioTimerRef.current = null;
+      }
+    };
+  }, []);
 
   // Filter lessons specifically tailored for Handover (Category: 'shift-handover' or 'error-code' or 'alarm')
   const handoverLessons = PRESET_LESSONS.filter(l => 
@@ -93,10 +103,35 @@ export const ShiftScheduler: React.FC<ShiftSchedulerProps> = ({
       gain.connect(ctx.destination);
       osc.start();
       osc.stop(ctx.currentTime + 0.6);
+      if (alertAudioTimerRef.current !== null) {
+        window.clearTimeout(alertAudioTimerRef.current);
+      }
+      alertAudioTimerRef.current = window.setTimeout(() => {
+        alertAudioTimerRef.current = null;
+        ctx.close().catch(() => {});
+      }, 800);
     } catch (e) {
       console.warn("Audio Context not allowed or blocked:", e);
     }
   };
+
+  useEffect(() => {
+    if (!showHandoverPracticeModal) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setShowHandoverPracticeModal(false);
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        setActiveHandoverFlashcardIndex((prev) => (prev + 1) % Math.max(1, handoverLessons.length));
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        setActiveHandoverFlashcardIndex((prev) => (prev > 0 ? prev - 1 : Math.max(0, handoverLessons.length - 1)));
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showHandoverPracticeModal, handoverLessons.length]);
 
   const formatCountdown = (totalSec: number) => {
     const hours = Math.floor(totalSec / 3600);
@@ -134,8 +169,8 @@ export const ShiftScheduler: React.FC<ShiftSchedulerProps> = ({
         
         <div className="flex items-center justify-between gap-4 flex-wrap relative z-10">
           <div className="space-y-1">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/20 border border-indigo-400/40 text-indigo-300 text-xs font-mono font-bold">
-              <Clock className="w-3.5 h-3.5 text-cyan-400" />
+            <div className="inline-flex items-center gap-2 text-cyan-400 text-xs font-mono font-bold">
+              <Clock className="w-3.5 h-3.5 shrink-0" />
               <span>無塵室輪班與交接學習排程 (Shift Smart Reminder)</span>
             </div>
             <h2 className="text-xl sm:text-2xl font-black text-slate-100 tracking-tight font-mono">
@@ -148,7 +183,7 @@ export const ShiftScheduler: React.FC<ShiftSchedulerProps> = ({
 
           <div className="bg-slate-950/90 border border-slate-800 rounded-2xl p-4 text-right space-y-1 shrink-0">
             <span className="text-[11px] text-slate-500 font-mono font-bold block">無塵室目前時間</span>
-            <div className="text-lg font-black font-mono text-cyan-400 tracking-wider">
+            <div className="text-lg font-black font-mono text-cyan-400 tracking-wider tabular-nums">
               {now.toLocaleTimeString('zh-TW', { hour12: false })}
             </div>
           </div>
@@ -162,7 +197,7 @@ export const ShiftScheduler: React.FC<ShiftSchedulerProps> = ({
             initial={{ opacity: 0, scale: 0.95, y: -10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95 }}
-            className="bg-amber-400 text-slate-950 border-2 border-amber-300 rounded-3xl p-5 shadow-[0_0_30px_rgba(250,204,21,0.4)] flex items-center justify-between gap-4 flex-wrap animate-pulse"
+            className="bg-amber-400 text-slate-950 border-2 border-amber-300 rounded-3xl p-5 shadow-[0_0_24px_rgba(250,204,21,0.28)] flex items-center justify-between gap-4 flex-wrap"
           >
             <div className="flex items-center gap-3">
               <div className="w-12 h-12 rounded-2xl bg-slate-950 text-amber-400 flex items-center justify-center shrink-0">
@@ -171,9 +206,9 @@ export const ShiftScheduler: React.FC<ShiftSchedulerProps> = ({
               <div className="space-y-0.5">
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-black uppercase font-mono bg-slate-950 text-amber-400 px-2 py-0.5 rounded">
-                    ⚠️ 交接時間臨近！
+                    ⚠️ 交接時間臨近
                   </span>
-                  <span className="text-xs font-black font-mono">
+                  <span className="text-xs font-black font-mono tabular-nums">
                     距離交接僅剩 {hours}:{mins}:{secs}
                   </span>
                 </div>
@@ -184,8 +219,9 @@ export const ShiftScheduler: React.FC<ShiftSchedulerProps> = ({
             </div>
 
             <button
+              type="button"
               onClick={() => setShowHandoverPracticeModal(true)}
-              className="px-5 py-3 rounded-2xl bg-slate-950 hover:bg-slate-850 text-amber-300 font-black text-xs cursor-pointer shadow-lg transition-all hover:scale-105 active:scale-95 flex items-center gap-2 shrink-0"
+              className="px-5 py-3 rounded-2xl bg-slate-950 hover:bg-slate-800 text-amber-300 font-black text-xs cursor-pointer shadow-lg transition-colors active:scale-95 flex items-center gap-2 shrink-0"
             >
               <Zap className="w-4 h-4 text-amber-400 fill-amber-400" />
               <span>一鍵開始交接預習</span>
@@ -225,6 +261,8 @@ export const ShiftScheduler: React.FC<ShiftSchedulerProps> = ({
               return (
                 <button
                   key={shift.id}
+                  type="button"
+                  aria-pressed={isSelected}
                   onClick={() => handleSelectShiftType(shift.id as ShiftType)}
                   className={`p-3.5 rounded-2xl border text-left flex flex-col justify-between space-y-2 transition-all cursor-pointer ${
                     isSelected
@@ -327,7 +365,7 @@ export const ShiftScheduler: React.FC<ShiftSchedulerProps> = ({
             </div>
           ) : (
             <div className="bg-slate-950 border border-slate-800/90 rounded-2xl p-5 text-center space-y-3 shadow-inner">
-              <div className="flex items-center justify-center gap-2 font-mono text-4xl sm:text-5xl font-black text-cyan-400 tracking-tight">
+              <div className="flex items-center justify-center gap-2 font-mono text-4xl sm:text-5xl font-black text-cyan-400 tracking-tight tabular-nums">
                 <div className="bg-slate-900 border border-slate-800 rounded-xl px-2 py-1 min-w-[60px]">
                   {hours}
                   <span className="text-[10px] text-slate-500 block font-sans font-medium uppercase tracking-normal">Hrs</span>
@@ -344,7 +382,7 @@ export const ShiftScheduler: React.FC<ShiftSchedulerProps> = ({
                 </div>
               </div>
 
-              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-900 border border-slate-800 text-xs font-mono text-slate-300">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-900 border border-slate-800 text-xs font-mono text-slate-300 tabular-nums">
                 <Shield className="w-3.5 h-3.5 text-cyan-400" />
                 <span>預計交接時間：{shiftSettings.handoverTimeStr}</span>
               </div>
@@ -353,8 +391,9 @@ export const ShiftScheduler: React.FC<ShiftSchedulerProps> = ({
 
           {/* Quick Start Handover Practice Deck */}
           <button
+            type="button"
             onClick={() => setShowHandoverPracticeModal(true)}
-            className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-amber-400 to-yellow-500 hover:from-amber-300 hover:to-yellow-400 text-slate-950 font-black text-xs cursor-pointer shadow-lg transition-all hover:scale-[1.02] active:scale-95 flex items-center justify-center gap-2"
+            className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-amber-400 to-yellow-500 hover:from-amber-300 hover:to-yellow-400 text-slate-950 font-black text-xs cursor-pointer shadow-lg transition-colors active:scale-95 flex items-center justify-center gap-2"
           >
             <Zap className="w-4 h-4 fill-slate-950" />
             <span>開啟【交接班高頻口頭匯報速記卡】</span>
@@ -367,8 +406,15 @@ export const ShiftScheduler: React.FC<ShiftSchedulerProps> = ({
       {/* Handover Practice Flashcard Deck Modal */}
       <AnimatePresence>
         {showHandoverPracticeModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="交接班急診速記 Flashcard"
+            onClick={() => setShowHandoverPracticeModal(false)}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md"
+          >
             <motion.div
+              onClick={(e) => e.stopPropagation()}
               initial={{ scale: 0.9, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.9, opacity: 0, y: 20 }}
@@ -380,7 +426,7 @@ export const ShiftScheduler: React.FC<ShiftSchedulerProps> = ({
                     <Zap className="w-4 h-4 text-amber-400 fill-amber-400" />
                   </span>
                   <div>
-                    <h3 className="text-base font-black text-slate-100 font-mono">
+                    <h3 className="text-base font-black text-slate-100 font-mono tabular-nums">
                       交接班急診速記 Flashcard ({activeHandoverFlashcardIndex + 1} / {handoverLessons.length})
                     </h3>
                     <p className="text-xs text-slate-400">掌握大夜班 Alarm Down 機與處置進度匯報句型</p>
@@ -388,29 +434,45 @@ export const ShiftScheduler: React.FC<ShiftSchedulerProps> = ({
                 </div>
 
                 <button
+                  type="button"
+                  aria-label="關閉交接速記視窗"
                   onClick={() => setShowHandoverPracticeModal(false)}
-                  className="px-3 py-1.5 rounded-xl bg-slate-800 text-slate-300 hover:text-white text-xs font-bold cursor-pointer"
+                  className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-bold cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
                 >
-                  關閉
+                  關閉 (Esc)
                 </button>
               </div>
 
               {/* Current Flashcard */}
               <div className="bg-slate-950 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-inner">
-                <div className="flex items-center justify-between text-xs font-mono">
+                <div className="flex items-center justify-between gap-2 flex-wrap text-xs font-mono">
                   <span className="text-cyan-400 font-bold">【無塵室情境】{currentLesson.scenario}</span>
-                  <button
-                    onClick={() => speakEnglish(currentLesson.english_sentence, speechSpeed)}
-                    className="px-3 py-1.5 rounded-xl bg-cyan-400 text-slate-950 font-black flex items-center gap-1.5 hover:bg-cyan-300 cursor-pointer shadow"
-                  >
-                    <Volume2 className="w-3.5 h-3.5" />
-                    <span>聽正確發音</span>
-                  </button>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => speakEnglish(currentLesson.english_sentence, speechSpeed)}
+                      className="px-3 py-1.5 rounded-xl bg-cyan-400 text-slate-950 font-black flex items-center gap-1.5 hover:bg-cyan-300 cursor-pointer shadow"
+                    >
+                      <Volume2 className="w-3.5 h-3.5" />
+                      <span>聽正確發音</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => speakEnglish(currentLesson.english_sentence, 0.7)}
+                      className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 font-mono font-bold text-xs cursor-pointer transition-colors"
+                      title="0.7x 慢速清晰發音"
+                    >
+                      0.7x
+                    </button>
+                  </div>
                 </div>
 
                 <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 text-center space-y-2">
                   <div className="text-lg sm:text-xl font-black text-slate-100 font-mono tracking-tight">
                     "{currentLesson.english_sentence}"
+                  </div>
+                  <div className="text-sm font-bold text-emerald-300">
+                    {currentLesson.chinese_translation}
                   </div>
                   <div className="text-xs font-black text-amber-300 font-mono bg-amber-950/40 py-1 px-3 rounded-lg inline-block tracking-wide">
                     注音輔助：{(() => {
@@ -445,15 +507,17 @@ export const ShiftScheduler: React.FC<ShiftSchedulerProps> = ({
               {/* Navigation buttons */}
               <div className="flex items-center justify-between gap-3 pt-2">
                 <button
+                  type="button"
                   onClick={() => setActiveHandoverFlashcardIndex((prev) => (prev > 0 ? prev - 1 : handoverLessons.length - 1))}
-                  className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs cursor-pointer"
+                  className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
                 >
                   上一張句型
                 </button>
 
                 <button
+                  type="button"
                   onClick={() => setActiveHandoverFlashcardIndex((prev) => (prev + 1) % handoverLessons.length)}
-                  className="px-5 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs cursor-pointer shadow flex items-center gap-1.5"
+                  className="px-5 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs cursor-pointer shadow flex items-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
                 >
                   <span>下一張速記</span>
                   <ChevronRight className="w-4 h-4" />

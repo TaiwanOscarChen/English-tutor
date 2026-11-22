@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion } from 'motion/react';
 import {
   Search,
@@ -16,11 +16,15 @@ import {
   ShieldCheck,
   Cpu,
   Car,
-  Activity
+  Activity,
+  Upload,
+  Brain,
+  MessageSquare
 } from 'lucide-react';
 import { FAB_VOCAB } from '../data/fabVocab';
 import { PRESET_ARTICLES } from '../data/presetArticles';
 import { PRESET_LESSONS } from '../data/presetLessons';
+import { Article, Lesson, VocabItem } from '../types';
 import { speakEnglish } from '../utils/speech';
 import { playClickSound, playLaserScanSound } from '../utils/audioEffects';
 
@@ -35,9 +39,17 @@ interface GlobalCommandPaletteModalProps {
   onOpenMatchGameModal: () => void;
   onOpenVoiceSettings: () => void;
   onOpenSystemHealth?: () => void;
-  onOpenDecomposerModal?: () => void;
+  onOpenDecomposerModal?: (initialSentence?: string) => void;
   onOpenErrorCodeModal?: () => void;
+  onOpenMediaImportModal?: () => void;
+  onPracticeDueLessons?: () => void;
   onSelectLesson?: (lessonId: string) => void;
+  importedVocab?: VocabItem[];
+  importedLessons?: Lesson[];
+  bookmarkedLessons?: Lesson[];
+  autoVocab?: VocabItem[];
+  autoLessons?: Lesson[];
+  autoArticles?: Article[];
 }
 
 export const GlobalCommandPaletteModal: React.FC<GlobalCommandPaletteModalProps> = ({
@@ -53,39 +65,119 @@ export const GlobalCommandPaletteModal: React.FC<GlobalCommandPaletteModalProps>
   onOpenSystemHealth,
   onOpenDecomposerModal,
   onOpenErrorCodeModal,
-  onSelectLesson
+  onOpenMediaImportModal,
+  onPracticeDueLessons,
+  onSelectLesson,
+  importedVocab = [],
+  importedLessons = [],
+  bookmarkedLessons = [],
+  autoVocab = [],
+  autoLessons = [],
+  autoArticles = []
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
+  const [activeFlatIndex, setActiveFlatIndex] = useState<number>(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (isOpen) {
-      setTimeout(() => inputRef.current?.focus(), 50);
-      setSearchQuery('');
-    }
+    if (!isOpen) return;
+    const focusTimer = window.setTimeout(() => inputRef.current?.focus(), 50);
+    setSearchQuery('');
+    setActiveFlatIndex(0);
+    return () => window.clearTimeout(focusTimer);
   }, [isOpen]);
-
-  // Global keydown listeners for Palette
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        if (isOpen) {
-          onClose();
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
-
-  if (!isOpen) return null;
 
   const query = searchQuery.trim().toLowerCase();
 
+  // Merge and deduplicate vocab across preset, imported, and 3-day bundle
+  const mergedVocab = useMemo(() => {
+    const seen = new Set<string>();
+    const list: Array<VocabItem & { _sourceTag: string }> = [];
+    const pushItem = (v: VocabItem, tag: string) => {
+      const key = String(v.word || '').trim().toLowerCase();
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      list.push({ ...v, _sourceTag: tag });
+    };
+    importedVocab.forEach((v) => pushItem(v, String(v.id || '').startsWith('aoi-') ? 'AOI單音' : '導入'));
+    autoVocab.forEach((v) => pushItem(v, '3天更新'));
+    FAB_VOCAB.forEach((v) => pushItem(v, '核心'));
+    return list;
+  }, [importedVocab, autoVocab]);
+
+  // Merge and deduplicate lessons across imported, 3-day bundle, bookmarks, and preset
+  const mergedLessons = useMemo(() => {
+    const seen = new Set<string>();
+    const list: Array<Lesson & { _sourceTag: string }> = [];
+    const pushLesson = (l: Lesson, tag: string) => {
+      const key = String(l.english_sentence || '').trim().toLowerCase();
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      list.push({ ...l, _sourceTag: tag });
+    };
+    importedLessons.forEach((l) => pushLesson(l, '導入'));
+    autoLessons.forEach((l) => pushLesson(l, '3天更新'));
+    bookmarkedLessons.forEach((l) => pushLesson(l, '收藏'));
+    PRESET_LESSONS.forEach((l) => pushLesson(l, '預設'));
+    return list;
+  }, [importedLessons, autoLessons, bookmarkedLessons]);
+
+  const mergedArticles = useMemo(() => {
+    const seen = new Set<string>();
+    const list: Array<Article & { _sourceTag: string }> = [];
+    autoArticles.forEach((a) => {
+      if (!seen.has(a.id)) {
+        seen.add(a.id);
+        list.push({ ...a, _sourceTag: '3天更新' });
+      }
+    });
+    PRESET_ARTICLES.forEach((a) => {
+      if (!seen.has(a.id)) {
+        seen.add(a.id);
+        list.push({ ...a, _sourceTag: 'SOP' });
+      }
+    });
+    return list;
+  }, [autoArticles]);
+
   // 1. Actions
   const quickActions = [
+    onPracticeDueLessons && {
+      id: 'act-due-srs',
+      type: 'action',
+      title: '今日 SM-2 待複習句型特訓 (記憶曲線複習)',
+      subtitle: '篩選尚未熟記與到期的核心句型，強化長期記憶留存',
+      icon: Brain,
+      badge: '記憶曲線',
+      action: () => {
+        onClose();
+        onPracticeDueLessons();
+      }
+    },
+    {
+      id: 'act-ai-tutor',
+      type: 'action',
+      title: 'FSE AI 專屬英文口語教練 (即時串流對話)',
+      subtitle: '模擬機台異常回報、值班交接與英文短句即時拆解點撥',
+      icon: MessageSquare,
+      badge: 'AI 教練',
+      action: () => {
+        onClose();
+        onNavigateTab('knowledge', 'tutor');
+      }
+    },
+    onOpenMediaImportModal && {
+      id: 'act-media-import',
+      type: 'action',
+      title: '單音與教材導入系統 (照片 / 文字轉單音 & KK音標)',
+      subtitle: '支援貼上截圖、機台畫面或筆記，自動資安去識別化並拆解單音',
+      icon: Upload,
+      badge: '導入工具',
+      action: () => {
+        onClose();
+        onOpenMediaImportModal();
+      }
+    },
     {
       id: 'act-decomposer',
       type: 'action',
@@ -113,7 +205,7 @@ export const GlobalCommandPaletteModal: React.FC<GlobalCommandPaletteModalProps>
     {
       id: 'act-drive',
       type: 'action',
-      title: '無塵室通勤隨身聽 (免視線聽力與回音跟讀電台)',
+      title: '無塵室通勤隨身聽 (純淨聽力與回音跟讀電台)',
       subtitle: '支援三遍連播、睡眠定時、回音倒數與車機 MediaSession 控制',
       icon: Car,
       badge: '通勤必備',
@@ -152,7 +244,7 @@ export const GlobalCommandPaletteModal: React.FC<GlobalCommandPaletteModalProps>
       title: 'AI 口語跟讀與發音評測中心 (麥克風即時打分)',
       subtitle: '即時評測 EUV、FOUP、真空外洩、機台交接流利度與準確分',
       icon: Sparkles,
-      badge: 'PRO 升級',
+      badge: '語音評測',
       action: () => {
         onClose();
         onNavigateTab('shadowing');
@@ -242,20 +334,31 @@ export const GlobalCommandPaletteModal: React.FC<GlobalCommandPaletteModalProps>
         onOpenVoiceSettings();
       }
     }
-  ].filter((act) => !query || act.title.toLowerCase().includes(query) || act.subtitle.toLowerCase().includes(query));
+  ]
+    .filter(Boolean)
+    .filter((act: any) => !query || act.title.toLowerCase().includes(query) || act.subtitle.toLowerCase().includes(query) || act.badge.toLowerCase().includes(query)) as Array<{
+      id: string;
+      type: string;
+      title: string;
+      subtitle: string;
+      icon: React.FC<any>;
+      badge: string;
+      action: () => void;
+    }>;
 
   // 2. Vocabularies
-  const matchedVocab = FAB_VOCAB.filter(
+  const matchedVocab = mergedVocab.filter(
     (v) =>
       !query ||
       v.word.toLowerCase().includes(query) ||
       v.translation.toLowerCase().includes(query) ||
       v.category.toLowerCase().includes(query) ||
+      (v.kkPhonetic && v.kkPhonetic.toLowerCase().includes(query)) ||
       (v.memoryTrick && v.memoryTrick.toLowerCase().includes(query))
-  ).slice(0, 8);
+  ).slice(0, query ? 10 : 6);
 
   // 3. Articles
-  const matchedArticles = PRESET_ARTICLES.filter(
+  const matchedArticles = mergedArticles.filter(
     (a) =>
       !query ||
       a.title.toLowerCase().includes(query) ||
@@ -264,24 +367,96 @@ export const GlobalCommandPaletteModal: React.FC<GlobalCommandPaletteModalProps>
   ).slice(0, 4);
 
   // 4. Lessons
-  const matchedLessons = PRESET_LESSONS.filter(
+  const matchedLessons = mergedLessons.filter(
     (l) =>
       !query ||
       l.english_sentence.toLowerCase().includes(query) ||
       (l.chinese_translation && l.chinese_translation.toLowerCase().includes(query)) ||
       l.scenario.toLowerCase().includes(query)
-  ).slice(0, 6);
+  ).slice(0, query ? 8 : 5);
 
-  const totalResultsCount =
-    quickActions.length + matchedVocab.length + matchedArticles.length + matchedLessons.length;
+  const flatHandlers: Array<() => void> = [
+    ...quickActions.map((act) => () => {
+      playLaserScanSound();
+      act.action();
+    }),
+    ...matchedVocab.map((vocab) => () => {
+      playClickSound();
+      speakEnglish(vocab.word, speechSpeed);
+    }),
+    ...matchedArticles.map(() => () => {
+      playLaserScanSound();
+      onClose();
+      onNavigateTab('knowledge', 'articles');
+    }),
+    ...matchedLessons.map((lesson) => () => {
+      playClickSound();
+      if (onSelectLesson) {
+        onSelectLesson(lesson.id);
+      }
+      speakEnglish(lesson.english_sentence, speechSpeed);
+      onClose();
+    }),
+  ];
+
+  // Global keydown listeners for Palette (Cmd+K, ArrowUp/Down, Enter)
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (flatHandlers.length > 0) {
+          setActiveFlatIndex((prev) => (prev + 1) % flatHandlers.length);
+        }
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (flatHandlers.length > 0) {
+          setActiveFlatIndex((prev) => (prev - 1 + flatHandlers.length) % flatHandlers.length);
+        }
+      } else if (e.key === 'Enter') {
+        const handler = flatHandlers[activeFlatIndex];
+        if (handler) {
+          e.preventDefault();
+          handler();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose, activeFlatIndex, flatHandlers]);
+
+  if (!isOpen) return null;
+
+  const totalResultsCount = flatHandlers.length;
+  const vocabStartOffset = quickActions.length;
+  const articleStartOffset = vocabStartOffset + matchedVocab.length;
+  const lessonStartOffset = articleStartOffset + matchedArticles.length;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-12 sm:pt-20 p-3 sm:p-4 bg-slate-950/85 backdrop-blur-md">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="全域指令與術語快搜"
+      className="fixed inset-0 z-50 flex items-start justify-center pt-10 sm:pt-16 p-3 sm:p-4 bg-slate-950/85 backdrop-blur-md"
+      onClick={onClose}
+    >
       <motion.div
         initial={{ opacity: 0, scale: 0.96, y: -10 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.96, y: -10 }}
-        className="bg-slate-900 border-2 border-cyan-400/80 rounded-3xl w-full max-w-3xl max-h-[82vh] flex flex-col shadow-2xl overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+        className="bg-slate-900 border-2 border-cyan-400/80 rounded-3xl w-full max-w-3xl max-h-[84vh] flex flex-col shadow-2xl overflow-hidden"
       >
         {/* Search Input Bar */}
         <div className="p-3.5 sm:p-4 bg-slate-950 border-b border-slate-800 flex items-center gap-3 shrink-0">
@@ -290,42 +465,54 @@ export const GlobalCommandPaletteModal: React.FC<GlobalCommandPaletteModalProps>
             ref={inputRef}
             type="text"
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="搜尋晶圓廠單字 (Chamber, LOTO)、SOP 文章、實戰例句、AI 拆句工具..."
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              setActiveFlatIndex(0);
+            }}
+            placeholder="搜尋晶圓廠單字、導入單音、SOP 文章、實戰例句或工具..."
             className="flex-1 bg-transparent text-sm sm:text-base text-slate-100 placeholder-slate-500 outline-none font-medium"
           />
           {searchQuery && (
             <button
-              onClick={() => setSearchQuery('')}
+              type="button"
+              onClick={() => {
+                setSearchQuery('');
+                setActiveFlatIndex(0);
+              }}
+              aria-label="清除搜尋關鍵字"
               className="p-1 rounded-lg text-slate-500 hover:text-white cursor-pointer"
             >
               <X className="w-4 h-4" />
             </button>
           )}
           <button
+            type="button"
+            aria-label="關閉指令搜尋面板"
             onClick={onClose}
-            className="px-2 py-1 rounded-lg text-[11px] font-mono text-slate-300 hover:text-white bg-slate-900 hover:bg-slate-800 border border-slate-700 cursor-pointer shrink-0"
+            className="px-2.5 py-1 rounded-lg text-[11px] font-mono text-slate-300 hover:text-white bg-slate-900 hover:bg-slate-800 border border-slate-700 cursor-pointer shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
           >
             ESC 關閉
           </button>
         </div>
 
         {/* Results List */}
-        <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-4">
+        <div role="listbox" aria-label="搜尋結果" className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-4">
           {totalResultsCount === 0 ? (
             <div className="py-12 text-center text-slate-400 text-xs space-y-2">
               <Search className="w-8 h-8 mx-auto text-slate-600 opacity-50" />
               <p>查無符合 "{searchQuery}" 的晶圓廠術語或工具</p>
               <p className="text-[11px] text-slate-500">
-                試試輸入「Chamber」、「SVO」、「LOTO」、「HF」或直接使用上方「AI 萬能句子拆解器」
+                試試輸入「Chamber」、「AOI」、「Sensor」、「LOTO」或使用上方 AI 拆句器
               </p>
               {onOpenDecomposerModal && (
                 <button
+                  type="button"
                   onClick={() => {
+                    const phrase = searchQuery.trim();
                     onClose();
-                    onOpenDecomposerModal();
+                    onOpenDecomposerModal(phrase || undefined);
                   }}
-                  className="mt-2 inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-400 text-slate-950 font-black text-xs cursor-pointer"
+                  className="mt-2 inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs cursor-pointer"
                 >
                   <Sparkles className="w-3.5 h-3.5" />
                   <span>用 AI 拆解「{searchQuery}」</span>
@@ -338,22 +525,38 @@ export const GlobalCommandPaletteModal: React.FC<GlobalCommandPaletteModalProps>
               {quickActions.length > 0 && (
                 <div className="space-y-1.5">
                   <div className="text-[11px] font-mono font-bold text-slate-400 px-2 uppercase tracking-wider">
-                    ⚡ 常用快捷功能與 AI 工具 (Quick Actions)
+                    常用快捷功能與 AI 工具
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {quickActions.map((act) => {
+                    {quickActions.map((act, idx) => {
                       const Icon = act.icon;
+                      const isHighlighted = activeFlatIndex === idx;
                       return (
                         <div
                           key={act.id}
+                          role="option"
+                          aria-selected={isHighlighted}
+                          tabIndex={0}
+                          onMouseEnter={() => setActiveFlatIndex(idx)}
                           onClick={() => {
                             playLaserScanSound();
                             act.action();
                           }}
-                          className="p-3 rounded-2xl bg-slate-950/80 hover:bg-slate-800/90 border border-slate-800/90 hover:border-cyan-400/50 flex items-center justify-between gap-3 cursor-pointer transition-all group"
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              playLaserScanSound();
+                              act.action();
+                            }
+                          }}
+                          className={`p-3 rounded-2xl border flex items-center justify-between gap-3 cursor-pointer transition-all group focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
+                            isHighlighted
+                              ? 'bg-slate-800/95 border-cyan-400 ring-1 ring-cyan-400/50'
+                              : 'bg-slate-950/80 hover:bg-slate-800/90 border-slate-800/90 hover:border-cyan-400/50'
+                          }`}
                         >
                           <div className="flex items-center gap-2.5 min-w-0">
-                            <div className="w-8 h-8 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                            <div className="w-8 h-8 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 flex items-center justify-center shrink-0 transition-colors">
                               <Icon className="w-4 h-4" />
                             </div>
                             <div className="min-w-0">
@@ -365,7 +568,7 @@ export const GlobalCommandPaletteModal: React.FC<GlobalCommandPaletteModalProps>
                               </p>
                             </div>
                           </div>
-                          <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-900 text-slate-400 border border-slate-800 shrink-0">
+                          <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-900 text-slate-300 border border-slate-700 shrink-0">
                             {act.badge}
                           </span>
                         </div>
@@ -378,141 +581,243 @@ export const GlobalCommandPaletteModal: React.FC<GlobalCommandPaletteModalProps>
               {/* Vocabularies */}
               {matchedVocab.length > 0 && (
                 <div className="space-y-1.5">
-                  <div className="text-[11px] font-mono font-bold text-amber-400 px-2 uppercase tracking-wider flex items-center justify-between">
-                    <span>📚 晶圓廠核心單字庫 ({matchedVocab.length})</span>
-                    <span className="text-[10px] text-slate-500">點擊可朗讀發音</span>
+                  <div className="text-[11px] font-mono font-bold text-amber-400 px-2 uppercase tracking-wider flex items-center justify-between tabular-nums">
+                    <span>晶圓廠與導入單音字庫 ({matchedVocab.length})</span>
+                    <span className="text-[10px] text-slate-500">點擊立即朗讀發音</span>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {matchedVocab.map((vocab) => (
-                      <div
-                        key={vocab.id}
-                        onClick={() => {
-                          playClickSound();
-                          speakEnglish(vocab.word, speechSpeed);
-                        }}
-                        className="p-3 rounded-2xl bg-slate-950/80 hover:bg-slate-800/90 border border-slate-800/90 hover:border-amber-400/50 flex items-center justify-between gap-3 cursor-pointer transition-all group"
-                      >
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-mono font-black text-xs text-amber-300 break-words group-hover:text-amber-200">
-                              {vocab.word}
-                            </span>
-                            <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-900 text-slate-400 font-mono">
-                              {vocab.taiwanPhonetic}
-                            </span>
-                          </div>
-                          <p className="text-xs text-slate-300 break-words mt-0.5">
-                            {vocab.translation}
-                          </p>
-                          {vocab.memoryTrick && (
-                            <p className="text-[10px] text-cyan-300/90 break-words font-mono mt-0.5">
-                              💡 {vocab.memoryTrick}
-                            </p>
-                          )}
-                        </div>
-
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
+                    {matchedVocab.map((vocab, idx) => {
+                      const flatIdx = vocabStartOffset + idx;
+                      const isHighlighted = activeFlatIndex === flatIdx;
+                      return (
+                        <div
+                          key={vocab.id}
+                          role="option"
+                          aria-selected={isHighlighted}
+                          tabIndex={0}
+                          onMouseEnter={() => setActiveFlatIndex(flatIdx)}
+                          onClick={() => {
                             playClickSound();
                             speakEnglish(vocab.word, speechSpeed);
                           }}
-                          className="p-2 rounded-xl bg-slate-900 hover:bg-amber-400 hover:text-slate-950 text-slate-400 transition-all shrink-0 cursor-pointer"
-                          title="播放發音"
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              playClickSound();
+                              speakEnglish(vocab.word, speechSpeed);
+                            }
+                          }}
+                          className={`p-3 rounded-2xl border flex items-center justify-between gap-3 cursor-pointer transition-all group focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${
+                            isHighlighted
+                              ? 'bg-slate-800/95 border-amber-400 ring-1 ring-amber-400/50'
+                              : 'bg-slate-950/80 hover:bg-slate-800/90 border-slate-800/90 hover:border-amber-400/50'
+                          }`}
                         >
-                          <Volume2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    ))}
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-mono font-black text-xs text-amber-300 break-words group-hover:text-amber-200">
+                                {vocab.word}
+                              </span>
+                              {vocab.kkPhonetic && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-950/80 text-cyan-200 border border-cyan-500/30 font-mono">
+                                  {vocab.kkPhonetic}
+                                </span>
+                              )}
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-900 text-slate-400 font-mono">
+                                {vocab._sourceTag}
+                              </span>
+                            </div>
+                            <p className="text-xs text-slate-200 break-words mt-0.5 font-semibold">
+                              {vocab.translation}
+                            </p>
+                            {vocab.memoryTrick && (
+                              <p className="text-[10px] text-cyan-300/90 break-words font-mono mt-0.5">
+                                {vocab.memoryTrick}
+                              </p>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              type="button"
+                              aria-label={`以 0.7x 慢速播放 ${vocab.word}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                playClickSound();
+                                speakEnglish(vocab.word, 0.7);
+                              }}
+                              className="px-1.5 py-1 rounded-lg bg-slate-900 hover:bg-cyan-400 hover:text-slate-950 text-cyan-300 text-[10px] font-mono font-bold transition-all cursor-pointer tabular-nums focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+                              title="0.7x 慢速播放"
+                            >
+                              0.7x
+                            </button>
+                            <button
+                              type="button"
+                              aria-label={`播放 ${vocab.word} 發音`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                playClickSound();
+                                speakEnglish(vocab.word, speechSpeed);
+                              }}
+                              className="p-2 rounded-xl bg-slate-900 hover:bg-amber-400 hover:text-slate-950 text-slate-400 transition-all cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+                              title="播放發音"
+                            >
+                              <Volume2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
 
-              {/* Preset Articles */}
+              {/* Preset & Updated Articles */}
               {matchedArticles.length > 0 && (
                 <div className="space-y-1.5">
-                  <div className="text-[11px] font-mono font-bold text-cyan-400 px-2 uppercase tracking-wider">
-                    📄 無塵室 SOP 專題文章 ({matchedArticles.length})
+                  <div className="text-[11px] font-mono font-bold text-cyan-400 px-2 uppercase tracking-wider tabular-nums">
+                    無塵室 SOP 專題文章 ({matchedArticles.length})
                   </div>
                   <div className="space-y-2">
-                    {matchedArticles.map((article) => (
-                      <div
-                        key={article.id}
-                        onClick={() => {
-                          playLaserScanSound();
-                          onClose();
-                          onNavigateTab('knowledge', 'articles');
-                        }}
-                        className="p-3 rounded-2xl bg-slate-950/80 hover:bg-slate-800/90 border border-slate-800 hover:border-cyan-400/50 flex items-center justify-between gap-3 cursor-pointer transition-all group"
-                      >
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <FileText className="w-4 h-4 text-cyan-400 shrink-0" />
-                          <div className="min-w-0">
-                            <p className="text-xs font-bold text-slate-100 break-words group-hover:text-cyan-300">
-                              {article.title}
-                            </p>
-                            <p className="text-[11px] text-slate-400 break-words">
-                              {article.category} • {article.readTime}
-                            </p>
+                    {matchedArticles.map((article, idx) => {
+                      const flatIdx = articleStartOffset + idx;
+                      const isHighlighted = activeFlatIndex === flatIdx;
+                      return (
+                        <div
+                          key={article.id}
+                          role="option"
+                          aria-selected={isHighlighted}
+                          tabIndex={0}
+                          onMouseEnter={() => setActiveFlatIndex(flatIdx)}
+                          onClick={() => {
+                            playLaserScanSound();
+                            onClose();
+                            onNavigateTab('knowledge', 'articles');
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              playLaserScanSound();
+                              onClose();
+                              onNavigateTab('knowledge', 'articles');
+                            }
+                          }}
+                          className={`p-3 rounded-2xl border flex items-center justify-between gap-3 cursor-pointer transition-all group focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
+                            isHighlighted
+                              ? 'bg-slate-800/95 border-cyan-400 ring-1 ring-cyan-400/50'
+                              : 'bg-slate-950/80 hover:bg-slate-800/90 border-slate-800 hover:border-cyan-400/50'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <FileText className="w-4 h-4 text-cyan-400 shrink-0" />
+                            <div className="min-w-0">
+                              <p className="text-xs font-bold text-slate-100 break-words group-hover:text-cyan-300">
+                                {article.title}
+                              </p>
+                              <p className="text-[11px] text-slate-400 break-words">
+                                {article._sourceTag} · {article.category} · {article.readTime}
+                              </p>
+                            </div>
                           </div>
+                          <ArrowRight className="w-4 h-4 text-slate-500 group-hover:text-cyan-300 shrink-0" />
                         </div>
-                        <ArrowRight className="w-4 h-4 text-slate-500 group-hover:text-cyan-300 shrink-0" />
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               )}
 
-              {/* Preset Lessons */}
+              {/* Merged Lessons (Preset + Imported + 3-Day + Bookmarked) */}
               {matchedLessons.length > 0 && (
                 <div className="space-y-1.5">
-                  <div className="text-[11px] font-mono font-bold text-emerald-400 px-2 uppercase tracking-wider flex items-center justify-between">
-                    <span>🎯 每日實戰句型 ({matchedLessons.length})</span>
-                    <span className="text-[10px] text-slate-500">點擊直接跳轉至該關卡教材</span>
+                  <div className="text-[11px] font-mono font-bold text-emerald-400 px-2 uppercase tracking-wider flex items-center justify-between tabular-nums">
+                    <span>實戰句型關卡（含導入與收藏）({matchedLessons.length})</span>
+                    <span className="text-[10px] text-slate-500">點擊直接跳轉該關卡</span>
                   </div>
                   <div className="space-y-2">
-                    {matchedLessons.map((lesson) => (
-                      <div
-                        key={lesson.id}
-                        onClick={() => {
-                          playClickSound();
-                          if (onSelectLesson) {
-                            onSelectLesson(lesson.id);
-                          }
-                          speakEnglish(lesson.english_sentence, speechSpeed);
-                          onClose();
-                        }}
-                        className="p-3 rounded-2xl bg-slate-950/80 hover:bg-slate-800/90 border border-slate-800 hover:border-emerald-400/50 flex items-center justify-between gap-3 cursor-pointer transition-all group"
-                      >
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-950 text-emerald-300 border border-emerald-800 font-bold">
-                              {lesson.scenario.replace(/^🎬\s*情境：\s*/, '')}
-                            </span>
-                            <p className="font-mono text-xs font-bold text-emerald-300 break-words">
-                              {lesson.english_sentence}
+                    {matchedLessons.map((lesson, idx) => {
+                      const flatIdx = lessonStartOffset + idx;
+                      const isHighlighted = activeFlatIndex === flatIdx;
+                      return (
+                        <div
+                          key={lesson.id}
+                          role="option"
+                          aria-selected={isHighlighted}
+                          tabIndex={0}
+                          onMouseEnter={() => setActiveFlatIndex(flatIdx)}
+                          onClick={() => {
+                            playClickSound();
+                            if (onSelectLesson) {
+                              onSelectLesson(lesson.id);
+                            }
+                            speakEnglish(lesson.english_sentence, speechSpeed);
+                            onClose();
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              playClickSound();
+                              if (onSelectLesson) {
+                                onSelectLesson(lesson.id);
+                              }
+                              speakEnglish(lesson.english_sentence, speechSpeed);
+                              onClose();
+                            }
+                          }}
+                          className={`p-3 rounded-2xl border flex items-center justify-between gap-3 cursor-pointer transition-all group focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 ${
+                            isHighlighted
+                              ? 'bg-slate-800/95 border-emerald-400 ring-1 ring-emerald-400/50'
+                              : 'bg-slate-950/80 hover:bg-slate-800/90 border-slate-800 hover:border-emerald-400/50'
+                          }`}
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-900 text-slate-300 border border-slate-700 font-mono">
+                                {lesson._sourceTag}
+                              </span>
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800 font-bold">
+                                {lesson.scenario.replace(/^🎬\s*情境：\s*/, '')}
+                              </span>
+                              <p className="font-mono text-xs font-bold text-emerald-300 break-words">
+                                {lesson.english_sentence}
+                              </p>
+                            </div>
+                            <p className="text-xs text-slate-300 break-words mt-0.5">
+                              {lesson.chinese_translation}
                             </p>
                           </div>
-                          <p className="text-xs text-slate-300 break-words mt-0.5">
-                            {lesson.chinese_translation}
-                          </p>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              type="button"
+                              aria-label="以 0.7x 慢速試聽句型"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                playClickSound();
+                                speakEnglish(lesson.english_sentence, 0.7);
+                              }}
+                              className="px-1.5 py-1 rounded-lg bg-slate-900 hover:bg-cyan-400 hover:text-slate-950 text-cyan-300 text-[10px] font-mono font-bold transition-all cursor-pointer tabular-nums focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+                              title="0.7x 慢速試聽"
+                            >
+                              0.7x
+                            </button>
+                            <button
+                              type="button"
+                              aria-label="試聽句型發音"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                playClickSound();
+                                speakEnglish(lesson.english_sentence, speechSpeed);
+                              }}
+                              className="p-1.5 rounded-xl bg-slate-900 hover:bg-emerald-400 hover:text-slate-950 text-slate-400 transition-all cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
+                              title="僅試聽發音"
+                            >
+                              <Volume2 className="w-3.5 h-3.5" />
+                            </button>
+                            <ArrowRight className="w-4 h-4 text-slate-500 group-hover:text-emerald-300" />
+                          </div>
                         </div>
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              playClickSound();
-                              speakEnglish(lesson.english_sentence, speechSpeed);
-                            }}
-                            className="p-1.5 rounded-xl bg-slate-900 hover:bg-emerald-400 hover:text-slate-950 text-slate-400 transition-all cursor-pointer"
-                            title="僅試聽發音"
-                          >
-                            <Volume2 className="w-3.5 h-3.5" />
-                          </button>
-                          <ArrowRight className="w-4 h-4 text-slate-500 group-hover:text-emerald-300" />
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -521,14 +826,20 @@ export const GlobalCommandPaletteModal: React.FC<GlobalCommandPaletteModalProps>
         </div>
 
         {/* Footer */}
-        <div className="p-3 bg-slate-950 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400 font-mono shrink-0">
-          <div className="flex items-center gap-2">
-            <span>快捷鍵：</span>
+        <div className="p-3 bg-slate-950 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400 font-mono shrink-0 flex-wrap gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span>導航：</span>
             <kbd className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-200 border border-slate-700 text-[10px]">
-              ⌘K / Ctrl+K
+              ↑ ↓ 選擇
+            </kbd>
+            <kbd className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-200 border border-slate-700 text-[10px]">
+              Enter 執行
+            </kbd>
+            <kbd className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-200 border border-slate-700 text-[10px]">
+              ⌘K
             </kbd>
           </div>
-          <span>科技英文 ✕ 國小拆解法</span>
+          <span className="tabular-nums">共 {totalResultsCount} 筆結果 · 科技英文 ✕ 國小拆解法</span>
         </div>
       </motion.div>
     </div>

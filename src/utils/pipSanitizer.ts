@@ -370,12 +370,35 @@ export function sanitizeLessonToPublicSafe(lesson: Lesson): {
     explanation: sanitizeTextToPublicSafe(q.explanation).text || q.explanation,
   }));
 
+  const sanitizeComponentField = (val?: string): string | undefined => {
+    if (!val || typeof val !== 'string') return undefined;
+    const trimmed = val.trim();
+    if (!trimmed || /^(null|undefined|none|n\/a|無|-|—)$/i.test(trimmed)) {
+      return undefined;
+    }
+    const cleaned = sanitizeTextToPublicSafe(trimmed).text;
+    if (!cleaned || /^(null|undefined|none|n\/a|無|-|—)$/i.test(cleaned)) {
+      return undefined;
+    }
+    return cleaned;
+  };
+
+  const sanitizedComponents = {
+    subject: sanitizeComponentField(lesson.components?.subject) || lesson.components?.subject || 'We',
+    action: sanitizeComponentField(lesson.components?.action) || lesson.components?.action || 'check',
+    object: sanitizeComponentField(lesson.components?.object) || lesson.components?.object || 'the tool',
+    ...(sanitizeComponentField(lesson.components?.bridge)
+      ? { bridge: sanitizeComponentField(lesson.components?.bridge) }
+      : {}),
+  };
+
   return {
     lesson: {
       ...lesson,
       scenario: cleanScenario,
       english_sentence: cleanEnglish,
       chinese_translation: cleanZh,
+      components: sanitizedComponents,
       memory_trick: cleanTrick,
       additional_context: cleanCtx,
       practiceQuestions: sanitizedQuizzes,

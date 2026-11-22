@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { motion } from 'motion/react';
 import {
   X,
@@ -62,6 +62,62 @@ export const FabEmergencyModal: React.FC<FabEmergencyModalProps> = ({
   const [isPlayingBroadcast, setIsPlayingBroadcast] = useState(false);
   const { showCopyToast } = useToast();
 
+  const broadcastTimerRef = useRef<number | null>(null);
+  const copyTimerRef = useRef<number | null>(null);
+
+  const clearBroadcastTimer = () => {
+    if (broadcastTimerRef.current !== null) {
+      window.clearTimeout(broadcastTimerRef.current);
+      broadcastTimerRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    if (!isOpen) {
+      clearBroadcastTimer();
+      setIsPlayingBroadcast(false);
+      cancelSpeech();
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    clearBroadcastTimer();
+    setIsPlayingBroadcast(false);
+    cancelSpeech();
+  }, [selectedProtocolId]);
+
+  useEffect(() => {
+    return () => {
+      clearBroadcastTimer();
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+      cancelSpeech();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        cancelSpeech();
+        onClose();
+      } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        e.preventDefault();
+        const curIdx = FAB_EMERGENCY_PROTOCOLS.findIndex((p) => p.id === selectedProtocolId);
+        const total = FAB_EMERGENCY_PROTOCOLS.length;
+        if (curIdx >= 0 && total > 1) {
+          const nextIdx = e.key === 'ArrowRight' ? (curIdx + 1) % total : (curIdx - 1 + total) % total;
+          playClickSound();
+          setSelectedProtocolId(FAB_EMERGENCY_PROTOCOLS[nextIdx].id);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose, selectedProtocolId]);
+
   if (!isOpen) return null;
 
   const currentProtocol =
@@ -69,23 +125,59 @@ export const FabEmergencyModal: React.FC<FabEmergencyModalProps> = ({
     FAB_EMERGENCY_PROTOCOLS[0];
 
   const handleCopy = (text: string, key: string, label: string = 'SOP 通報範本') => {
-    navigator.clipboard.writeText(text);
-    setCopiedKey(key);
     playLaserScanSound();
-    showCopyToast(label);
-    setTimeout(() => setCopiedKey(null), 2000);
+    try {
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        navigator.clipboard.writeText(text).catch(() => {});
+      }
+      setCopiedKey(key);
+      showCopyToast(label);
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+      copyTimerRef.current = window.setTimeout(() => setCopiedKey(null), 1800);
+    } catch {}
   };
 
-  const handlePlayBroadcast = (text: string) => {
+  const handlePlayBroadcast = (text: string, customRate?: number) => {
     playClickSound();
+    if (broadcastTimerRef.current !== null) {
+      window.clearTimeout(broadcastTimerRef.current);
+      broadcastTimerRef.current = null;
+    }
+    if (isPlayingBroadcast && customRate === undefined) {
+      cancelSpeech();
+      setIsPlayingBroadcast(false);
+      return;
+    }
+    cancelSpeech();
     setIsPlayingBroadcast(true);
-    speakEnglish(text, Math.min(0.9, speechSpeed));
-    setTimeout(() => setIsPlayingBroadcast(false), 8000);
+    speakEnglish(text, customRate ?? Math.min(0.9, speechSpeed), () => {
+      if (broadcastTimerRef.current !== null) {
+        window.clearTimeout(broadcastTimerRef.current);
+        broadcastTimerRef.current = null;
+      }
+      setIsPlayingBroadcast(false);
+    });
+    broadcastTimerRef.current = window.setTimeout(() => {
+      setIsPlayingBroadcast(false);
+      broadcastTimerRef.current = null;
+    }, 15000);
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/85 backdrop-blur-md">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="無塵室緊急事故應變與英文廣播求救手冊"
+      onClick={() => {
+        cancelSpeech();
+        onClose();
+      }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/85 backdrop-blur-md"
+    >
       <motion.div
+        onClick={(e) => e.stopPropagation()}
         initial={{ opacity: 0, scale: 0.95, y: 10 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95, y: 10 }}
@@ -94,7 +186,7 @@ export const FabEmergencyModal: React.FC<FabEmergencyModalProps> = ({
         {/* Top Header */}
         <div className="p-4 sm:p-5 bg-gradient-to-r from-rose-950 via-slate-950 to-slate-900 border-b border-slate-800 flex items-center justify-between gap-3 shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-rose-500/20 border border-rose-500/50 flex items-center justify-center text-rose-400 shadow-lg shadow-rose-500/20 animate-pulse">
+            <div className="w-10 h-10 rounded-2xl bg-rose-500/20 border border-rose-500/50 flex items-center justify-center text-rose-400 shadow-lg shadow-rose-500/20">
               <ShieldAlert className="w-6 h-6" />
             </div>
             <div>
@@ -113,29 +205,39 @@ export const FabEmergencyModal: React.FC<FabEmergencyModalProps> = ({
           </div>
 
           <button
+            type="button"
+            aria-label="關閉緊急手冊"
             onClick={() => {
               cancelSpeech();
               playClickSound();
               onClose();
             }}
-            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-all cursor-pointer"
+            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
+            title="關閉手冊 (Esc)"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Protocol Category Navigation Tabs */}
-        <div className="p-2.5 bg-slate-950 border-b border-slate-800 flex items-center gap-2 overflow-x-auto shrink-0 no-scrollbar">
+        <div
+          role="tablist"
+          aria-label="緊急事故應變類型"
+          className="p-2.5 bg-slate-950 border-b border-slate-800 flex items-center gap-2 overflow-x-auto shrink-0 no-scrollbar"
+        >
           {FAB_EMERGENCY_PROTOCOLS.map((proto) => {
             const isSelected = proto.id === selectedProtocolId;
             return (
               <button
                 key={proto.id}
+                type="button"
+                role="tab"
+                aria-selected={isSelected}
                 onClick={() => {
                   playClickSound();
                   setSelectedProtocolId(proto.id);
                 }}
-                className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 ${
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 ${
                   isSelected
                     ? 'bg-rose-500 text-slate-950 font-black shadow-md shadow-rose-500/30 ring-1 ring-rose-300'
                     : 'bg-slate-900 text-slate-300 hover:text-white border border-slate-800'
@@ -154,7 +256,7 @@ export const FabEmergencyModal: React.FC<FabEmergencyModalProps> = ({
           <div className="bg-slate-950/90 border border-rose-500/40 rounded-3xl p-4 sm:p-6 space-y-4">
             <div className="flex items-start justify-between gap-3 flex-wrap">
               <div>
-                <span className="px-2.5 py-0.5 rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/30 text-xs font-mono font-bold">
+                <span className="text-rose-400 text-xs font-mono font-bold">
                   {currentProtocol.titleEn}
                 </span>
                 <h3 className="text-lg font-black text-slate-100 mt-1">
@@ -175,20 +277,31 @@ export const FabEmergencyModal: React.FC<FabEmergencyModalProps> = ({
             <div className="bg-gradient-to-br from-rose-950/40 to-slate-900 border border-rose-500/60 rounded-2xl p-4 space-y-2.5">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 text-rose-300 font-black text-xs">
-                  <Radio className="w-4 h-4 text-rose-400 animate-pulse" />
+                  <Radio className="w-4 h-4 text-rose-400" />
                   <span>無塵室/廠務即時廣播英文原稿 (Emergency Broadcast Script)：</span>
                 </div>
 
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5 shrink-0">
                   <button
+                    type="button"
+                    aria-pressed={isPlayingBroadcast}
                     onClick={() => handlePlayBroadcast(currentProtocol.broadcastScriptEn)}
                     className="px-3 py-1.5 rounded-xl bg-rose-500 hover:bg-rose-400 text-slate-950 text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-md"
                   >
                     <Volume2 className="w-3.5 h-3.5" />
-                    <span>廣播朗讀</span>
+                    <span>{isPlayingBroadcast ? '停止廣播' : '廣播朗讀'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handlePlayBroadcast(currentProtocol.broadcastScriptEn, 0.7)}
+                    className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 text-xs font-mono font-bold transition-colors cursor-pointer tabular-nums"
+                    title="0.7x 慢速清晰朗讀緊急廣播"
+                  >
+                    0.7x
                   </button>
 
                   <button
+                    type="button"
                     onClick={() => handleCopy(currentProtocol.broadcastScriptEn, 'broadcast')}
                     className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition-all cursor-pointer"
                     title="複製廣播稿"
@@ -220,24 +333,37 @@ export const FabEmergencyModal: React.FC<FabEmergencyModalProps> = ({
                     className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-2"
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <span className="px-2.5 py-0.5 rounded-lg bg-amber-400 text-slate-950 font-mono font-black text-xs">
+                      <span className="px-2.5 py-0.5 rounded-lg bg-amber-400 text-slate-950 font-mono font-black text-xs tabular-nums">
                         STEP {step.stepNumber}
                       </span>
 
                       <div className="flex items-center gap-1">
                         <button
+                          type="button"
                           onClick={() => {
                             playClickSound();
                             speakEnglish(step.actionEn, speechSpeed);
                           }}
-                          className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-300 text-xs transition-all"
+                          className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-300 text-xs transition-all cursor-pointer"
                           title="朗讀英文處置"
                         >
                           <Volume2 className="w-3.5 h-3.5" />
                         </button>
                         <button
+                          type="button"
+                          onClick={() => {
+                            playClickSound();
+                            speakEnglish(step.actionEn, 0.7);
+                          }}
+                          className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 text-[10px] font-mono font-bold transition-colors cursor-pointer tabular-nums"
+                          title="0.7x 慢速清晰朗讀"
+                        >
+                          0.7x
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => handleCopy(step.actionEn, `step-${step.stepNumber}`)}
-                          className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition-all"
+                          className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition-all cursor-pointer"
                           title="複製英文"
                         >
                           {copiedKey === `step-${step.stepNumber}` ? (
@@ -305,15 +431,30 @@ export const FabEmergencyModal: React.FC<FabEmergencyModalProps> = ({
                       <span className="font-mono font-black text-amber-300 text-xs">
                         {vocab.term}
                       </span>
-                      <button
-                        onClick={() => {
-                          playClickSound();
-                          speakEnglish(vocab.term, speechSpeed);
-                        }}
-                        className="p-1 rounded bg-slate-800 text-slate-400 hover:text-white"
-                      >
-                        <Volume2 className="w-3 h-3" />
-                      </button>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            playClickSound();
+                            speakEnglish(vocab.term, speechSpeed);
+                          }}
+                          className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white cursor-pointer transition-colors"
+                          title="標準發音"
+                        >
+                          <Volume2 className="w-3 h-3" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            playClickSound();
+                            speakEnglish(vocab.term, 0.7);
+                          }}
+                          className="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 text-[10px] font-mono font-bold cursor-pointer transition-colors"
+                          title="0.7x 慢速發音"
+                        >
+                          0.7x
+                        </button>
+                      </div>
                     </div>
                     <p className="text-slate-300 font-medium">{vocab.meaning}</p>
                     <p className="text-slate-400 font-mono text-[11px] italic">
@@ -334,12 +475,13 @@ export const FabEmergencyModal: React.FC<FabEmergencyModalProps> = ({
           </span>
 
           <button
+            type="button"
             onClick={() => {
               cancelSpeech();
               playClickSound();
               onClose();
             }}
-            className="px-5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition-all cursor-pointer"
+            className="px-5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
           >
             關閉手冊
           </button>

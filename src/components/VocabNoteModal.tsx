@@ -23,12 +23,37 @@ export const VocabNoteModal: React.FC<VocabNoteModalProps> = ({
 }) => {
   const [noteText, setNoteText] = useState(currentNote);
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const closeTimerRef = React.useRef<number | null>(null);
+
+  const clearCloseTimer = () => {
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  };
 
   // Sync state when opened with a new item
   React.useEffect(() => {
+    clearCloseTimer();
     setNoteText(currentNote || '');
     setSavedSuccess(false);
   }, [vocabItem, currentNote, isOpen]);
+
+  React.useEffect(() => {
+    return () => clearCloseTimer();
+  }, []);
+
+  React.useEffect(() => {
+    if (!isOpen) return;
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [isOpen, onClose]);
 
   if (!isOpen || !vocabItem) return null;
 
@@ -36,7 +61,9 @@ export const VocabNoteModal: React.FC<VocabNoteModalProps> = ({
     playSuccessChime();
     onSaveNote(vocabItem.id, noteText.trim());
     setSavedSuccess(true);
-    setTimeout(() => {
+    clearCloseTimer();
+    closeTimerRef.current = window.setTimeout(() => {
+      closeTimerRef.current = null;
       onClose();
     }, 600);
   };
@@ -46,15 +73,24 @@ export const VocabNoteModal: React.FC<VocabNoteModalProps> = ({
     setNoteText('');
     onSaveNote(vocabItem.id, '');
     setSavedSuccess(true);
-    setTimeout(() => {
+    clearCloseTimer();
+    closeTimerRef.current = window.setTimeout(() => {
+      closeTimerRef.current = null;
       onClose();
     }, 400);
   };
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="客製化單字備忘筆記"
+        onClick={onClose}
+        className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4"
+      >
         <motion.div
+          onClick={(e) => e.stopPropagation()}
           initial={{ opacity: 0, scale: 0.92, y: 15 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.92, y: 15 }}
@@ -77,11 +113,14 @@ export const VocabNoteModal: React.FC<VocabNoteModalProps> = ({
             </div>
 
             <button
+              type="button"
+              aria-label="關閉筆記"
               onClick={() => {
                 playClickSound();
                 onClose();
               }}
-              className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-all cursor-pointer"
+              className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+              title="關閉筆記 (Esc)"
             >
               <X className="w-5 h-5" />
             </button>
@@ -118,6 +157,17 @@ export const VocabNoteModal: React.FC<VocabNoteModalProps> = ({
                       type="button"
                       onClick={() => {
                         playClickSound();
+                        speakEnglish(vocabItem.exampleSentence, 0.7);
+                      }}
+                      className="text-amber-300 hover:text-amber-100 cursor-pointer font-mono font-bold px-1.5 py-0.5 rounded bg-slate-900 border border-amber-500/30 hover:bg-slate-800 transition-colors text-[10px]"
+                      title="0.7x 慢速清晰聽例句"
+                    >
+                      0.7x
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        playClickSound();
                         const zh = vocabItem.exampleTranslation || vocabItem.exampleSentenceZh || getExampleTranslation(vocabItem.exampleSentence, vocabItem.word);
                         speakChinese(zh);
                       }}
@@ -144,11 +194,17 @@ export const VocabNoteModal: React.FC<VocabNoteModalProps> = ({
           <div className="space-y-1.5">
             <label className="block text-xs font-bold text-slate-300 flex items-center justify-between">
               <span>個人的記憶諧音 / 機台情境備忘：</span>
-              <span className="text-[10px] text-slate-500 font-mono">自動存入 localStorage</span>
+              <span className="text-[10px] text-slate-500 font-mono">Ctrl+Enter 快速儲存</span>
             </label>
             <textarea
               value={noteText}
               onChange={(e) => setNoteText(e.target.value)}
+              onKeyDown={(e) => {
+                if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                  e.preventDefault();
+                  handleSave();
+                }
+              }}
               placeholder="輸入你自己最熟悉的諧音口訣、光學檢測或製程設備異常情境、交接備忘提醒..."
               rows={4}
               className="w-full bg-slate-950 border border-slate-700 focus:border-amber-400 rounded-2xl p-3.5 text-xs sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-none transition-colors shadow-inner resize-none font-sans"

@@ -244,16 +244,54 @@ export const CustomMediaImportModal: React.FC<CustomMediaImportModalProps> = ({
   const backupJsonInputRef = useRef<HTMLInputElement | null>(null);
   const autoPlayAbortRef = useRef<boolean>(false);
   const cycleSimAbortRef = useRef<boolean>(false);
+  const chainSessionRef = useRef<number>(0);
+  const mediaTimerRef = useRef<number | null>(null);
 
-  // Stop auto-play when modal closes
+  const clearMediaTimer = () => {
+    if (mediaTimerRef.current !== null) {
+      window.clearTimeout(mediaTimerRef.current);
+      mediaTimerRef.current = null;
+    }
+  };
+
+  // Stop auto-play when modal closes or unmounts
   useEffect(() => {
     if (!isOpen) {
       autoPlayAbortRef.current = true;
       cycleSimAbortRef.current = true;
+      chainSessionRef.current += 1;
+      clearMediaTimer();
       setIsAutoPlayingPhonics(false);
       setIsSimulatingCycle(false);
+      setActiveSpeakingSound(null);
+      cancelSpeech();
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    return () => {
+      autoPlayAbortRef.current = true;
+      cycleSimAbortRef.current = true;
+      chainSessionRef.current += 1;
+      clearMediaTimer();
+      cancelSpeech();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (editingVocabId) {
+          setEditingVocabId(null);
+        } else {
+          onClose();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [isOpen, editingVocabId, onClose]);
 
   // Global Ctrl+V / Paste support for instant screenshot or text import when modal is open
   useEffect(() => {
@@ -505,34 +543,50 @@ export const CustomMediaImportModal: React.FC<CustomMediaImportModalProps> = ({
 
   const handleSpeakSingleSound = (soundText: string, keyId: string) => {
     playClickSound();
+    autoPlayAbortRef.current = true;
+    cycleSimAbortRef.current = true;
+    setIsAutoPlayingPhonics(false);
+    setIsSimulatingCycle(false);
+    chainSessionRef.current += 1;
+    clearMediaTimer();
     setActiveSpeakingSound(keyId);
     speakSingleEnglishWord(soundText, 0.62, () => {
-      setActiveSpeakingSound(null);
-    });
-    setTimeout(() => {
       setActiveSpeakingSound((prev) => (prev === keyId ? null : prev));
-    }, 1200);
+    });
+    mediaTimerRef.current = window.setTimeout(() => {
+      setActiveSpeakingSound((prev) => (prev === keyId ? null : prev));
+    }, 1500);
   };
 
   // Syllable-by-syllable chain playback: reads each syllable slowly -> full word -> Chinese translation
   const handleChainPlayWordSyllables = (item: VocabItem, singleSounds: SingleSoundSyllable[]) => {
     playClickSound();
+    autoPlayAbortRef.current = true;
+    cycleSimAbortRef.current = true;
+    setIsAutoPlayingPhonics(false);
+    setIsSimulatingCycle(false);
     cancelSpeech();
+    clearMediaTimer();
+    const sessionId = ++chainSessionRef.current;
     let idx = 0;
 
     const nextSyllable = () => {
+      if (chainSessionRef.current !== sessionId) return;
       if (idx < singleSounds.length) {
         const syl = singleSounds[idx];
         const soundKey = `${item.id}-syl-${idx}`;
         setActiveSpeakingSound(soundKey);
         idx += 1;
         speakSingleEnglishWord(syl.sound, 0.6, () => {
-          setTimeout(nextSyllable, 220);
+          if (chainSessionRef.current !== sessionId) return;
+          mediaTimerRef.current = window.setTimeout(nextSyllable, 220);
         });
       } else {
         setActiveSpeakingSound(null);
         speakEnglish(item.word, 0.78, () => {
-          setTimeout(() => {
+          if (chainSessionRef.current !== sessionId) return;
+          mediaTimerRef.current = window.setTimeout(() => {
+            if (chainSessionRef.current !== sessionId) return;
             const cleanTrans = item.translation.replace(/\s*[\(（][^\)）]*[\)）]/g, '').trim() || item.translation;
             speakChinese(cleanTrans, 1.05);
           }, 220);
@@ -546,6 +600,11 @@ export const CustomMediaImportModal: React.FC<CustomMediaImportModalProps> = ({
   // Simulate AOI 5-State Process Cycle
   const handleToggleSimulateCycle = () => {
     playClickSound();
+    clearMediaTimer();
+    autoPlayAbortRef.current = true;
+    setIsAutoPlayingPhonics(false);
+    chainSessionRef.current += 1;
+    setActiveSpeakingSound(null);
     if (isSimulatingCycle) {
       cycleSimAbortRef.current = true;
       setIsSimulatingCycle(false);
@@ -568,11 +627,11 @@ export const CustomMediaImportModal: React.FC<CustomMediaImportModalProps> = ({
 
       speakEnglish(st.eng, 0.78, () => {
         if (cycleSimAbortRef.current) return;
-        setTimeout(() => {
+        mediaTimerRef.current = window.setTimeout(() => {
           if (cycleSimAbortRef.current) return;
           speakChinese(st.zh, 1.05, () => {
             if (cycleSimAbortRef.current) return;
-            setTimeout(runStep, 350);
+            mediaTimerRef.current = window.setTimeout(runStep, 350);
           });
         }, 180);
       });
@@ -635,6 +694,10 @@ export const CustomMediaImportModal: React.FC<CustomMediaImportModalProps> = ({
   // Sequential Auto-Play across all displayed single-sound words
   const handleToggleAutoPlayPhonics = () => {
     playClickSound();
+    clearMediaTimer();
+    cycleSimAbortRef.current = true;
+    setIsSimulatingCycle(false);
+    chainSessionRef.current += 1;
     if (isAutoPlayingPhonics) {
       autoPlayAbortRef.current = true;
       setIsAutoPlayingPhonics(false);
@@ -657,15 +720,20 @@ export const CustomMediaImportModal: React.FC<CustomMediaImportModalProps> = ({
       const item = displayVocabList[wordIdx];
       const soundKey = `${item.id}-syl-0`;
       setActiveSpeakingSound(soundKey);
+      const cleanTrans =
+        item.translation
+          .replace(/\s*[\(（][^\)）]*[\)）]/g, '')
+          .split('/')[0]
+          .trim() || item.translation;
 
       speakSingleEnglishWord(item.word, 0.65, () => {
         if (autoPlayAbortRef.current) return;
-        setTimeout(() => {
+        mediaTimerRef.current = window.setTimeout(() => {
           if (autoPlayAbortRef.current) return;
-          speakChinese(item.translation, 1.05, () => {
+          speakChinese(cleanTrans, 1.05, () => {
             if (autoPlayAbortRef.current) return;
             wordIdx += 1;
-            setTimeout(playNextWord, 350);
+            mediaTimerRef.current = window.setTimeout(playNextWord, 350);
           });
         }, 200);
       });
@@ -778,8 +846,18 @@ export const CustomMediaImportModal: React.FC<CustomMediaImportModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="單音與教材導入系統"
+      onClick={() => {
+        playClickSound();
+        onClose();
+      }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in"
+    >
       <motion.div
+        onClick={(e) => e.stopPropagation()}
         initial={{ opacity: 0, scale: 0.96, y: 10 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.96, y: 10 }}
@@ -849,11 +927,13 @@ export const CustomMediaImportModal: React.FC<CustomMediaImportModalProps> = ({
             )}
 
             <button
+              type="button"
+              aria-label="關閉導入系統"
               onClick={() => {
                 playClickSound();
                 onClose();
               }}
-              className="p-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-800 transition-colors cursor-pointer shrink-0"
+              className="p-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-800 transition-colors cursor-pointer shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
               title="關閉"
             >
               <X className="w-4 h-4" />
@@ -863,13 +943,16 @@ export const CustomMediaImportModal: React.FC<CustomMediaImportModalProps> = ({
 
         {/* Mode Selector & Quick Word/Sentence Input Bar */}
         <div className="px-4 py-2 bg-slate-950/60 border-b border-slate-800/80 flex items-center justify-between gap-2 flex-wrap shrink-0">
-          <div className="flex items-center gap-1.5 flex-wrap">
+          <div role="tablist" aria-label="導入模式切換" className="flex items-center gap-1.5 flex-wrap">
             <button
+              type="button"
+              role="tab"
+              aria-selected={importMode === 'aoi-notes'}
               onClick={() => {
                 playClickSound();
                 setImportMode('aoi-notes');
               }}
-              className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${
                 importMode === 'aoi-notes'
                   ? 'bg-amber-400 text-slate-950 shadow-sm'
                   : 'bg-slate-900 text-amber-300 hover:text-white border border-amber-500/40'
@@ -880,11 +963,14 @@ export const CustomMediaImportModal: React.FC<CustomMediaImportModalProps> = ({
             </button>
 
             <button
+              type="button"
+              role="tab"
+              aria-selected={importMode === 'photo'}
               onClick={() => {
                 playClickSound();
                 setImportMode('photo');
               }}
-              className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
                 importMode === 'photo'
                   ? 'bg-cyan-400 text-slate-950 shadow-sm'
                   : 'bg-slate-900 text-slate-300 hover:text-white border border-slate-800'
@@ -895,11 +981,14 @@ export const CustomMediaImportModal: React.FC<CustomMediaImportModalProps> = ({
             </button>
 
             <button
+              type="button"
+              role="tab"
+              aria-selected={importMode === 'file'}
               onClick={() => {
                 playClickSound();
                 setImportMode('file');
               }}
-              className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${
                 importMode === 'file'
                   ? 'bg-amber-400 text-slate-950 shadow-sm'
                   : 'bg-slate-900 text-slate-300 hover:text-white border border-slate-800'
@@ -910,11 +999,14 @@ export const CustomMediaImportModal: React.FC<CustomMediaImportModalProps> = ({
             </button>
 
             <button
+              type="button"
+              role="tab"
+              aria-selected={importMode === 'library'}
               onClick={() => {
                 playClickSound();
                 setImportMode('library');
               }}
-              className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 ${
                 importMode === 'library'
                   ? 'bg-emerald-400 text-slate-950 shadow-sm'
                   : 'bg-slate-900 text-slate-300 hover:text-white border border-slate-800'
@@ -1023,11 +1115,21 @@ export const CustomMediaImportModal: React.FC<CustomMediaImportModalProps> = ({
                   return (
                     <div
                       key={sheet.id}
+                      role="button"
+                      tabIndex={0}
+                      aria-pressed={isSelected}
                       onClick={() => {
                         playClickSound();
                         setSelectedAoiSheet(isSelected ? 'all' : sheet.id);
                       }}
-                      className={`rounded-xl border p-3 bg-slate-900/90 cursor-pointer transition-all flex flex-col justify-between gap-1.5 ${
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          playClickSound();
+                          setSelectedAoiSheet(isSelected ? 'all' : sheet.id);
+                        }
+                      }}
+                      className={`rounded-xl border p-3 bg-slate-900/90 cursor-pointer transition-all flex flex-col justify-between gap-1.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${
                         isSelected
                           ? 'border-amber-400 ring-1 ring-amber-400/50 bg-amber-950/20'
                           : 'border-slate-800 hover:border-cyan-500/50'
@@ -1061,7 +1163,7 @@ export const CustomMediaImportModal: React.FC<CustomMediaImportModalProps> = ({
                       onClick={handleToggleSimulateCycle}
                       className={`px-2.5 py-1 rounded-lg text-xs font-black flex items-center gap-1 cursor-pointer transition-all ${
                         isSimulatingCycle
-                          ? 'bg-amber-400 text-slate-950 animate-pulse'
+                          ? 'bg-amber-400 text-slate-950'
                           : 'bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-200 border border-cyan-500/40'
                       }`}
                     >
@@ -1078,9 +1180,13 @@ export const CustomMediaImportModal: React.FC<CustomMediaImportModalProps> = ({
                           key={st.step}
                           onClick={() => {
                             playClickSound();
+                            clearMediaTimer();
                             setActiveProcessStateStep(st.step);
                             speakEnglish(st.eng, 0.78, () => {
-                              setTimeout(() => speakChinese(st.zh, 1.05), 180);
+                              mediaTimerRef.current = window.setTimeout(() => {
+                                mediaTimerRef.current = null;
+                                speakChinese(st.zh, 1.05);
+                              }, 180);
                             });
                           }}
                           className={`p-2 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
@@ -1319,7 +1425,7 @@ export const CustomMediaImportModal: React.FC<CustomMediaImportModalProps> = ({
                 {/* Loading or Status Banner */}
                 {isAnalyzing && (
                   <div className="bg-cyan-950/60 border border-cyan-500/40 rounded-xl px-3 py-2 flex items-center gap-2 text-xs text-cyan-200">
-                    <RefreshCw className="w-4 h-4 text-cyan-400 animate-spin shrink-0" />
+                    <RefreshCw className="w-4 h-4 text-cyan-400 motion-safe:animate-spin shrink-0" />
                     <span>正在拆解英文單音音節、KK音標、注音與諧音...</span>
                   </div>
                 )}
@@ -1367,9 +1473,9 @@ export const CustomMediaImportModal: React.FC<CustomMediaImportModalProps> = ({
                 {displayVocabList.length > 0 && activeResultTab === 'phonics' && (
                   <button
                     onClick={handleToggleAutoPlayPhonics}
-                    className={`px-2.5 py-1.2 rounded-xl text-xs font-black flex items-center gap-1 cursor-pointer transition-all ${
+                    className={`px-2.5 py-1.5 rounded-xl text-xs font-black flex items-center gap-1 cursor-pointer transition-all ${
                       isAutoPlayingPhonics
-                        ? 'bg-amber-400 text-slate-950 animate-pulse'
+                        ? 'bg-amber-400 text-slate-950'
                         : 'bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 border border-cyan-500/30'
                     }`}
                     title="自動依序連播所有單音字卡"
@@ -1384,7 +1490,7 @@ export const CustomMediaImportModal: React.FC<CustomMediaImportModalProps> = ({
                     playClickSound();
                     setActiveResultTab('phonics');
                   }}
-                  className={`px-3 py-1.2 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer transition-all ${
+                  className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer transition-all tabular-nums ${
                     activeResultTab === 'phonics'
                       ? 'bg-cyan-400 text-slate-950'
                       : 'bg-slate-900 text-slate-300 border border-slate-800'
@@ -1399,7 +1505,7 @@ export const CustomMediaImportModal: React.FC<CustomMediaImportModalProps> = ({
                     playClickSound();
                     setActiveResultTab('sentences');
                   }}
-                  className={`px-3 py-1.2 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer transition-all ${
+                  className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer transition-all tabular-nums ${
                     activeResultTab === 'sentences'
                       ? 'bg-amber-400 text-slate-950'
                       : 'bg-slate-900 text-slate-300 border border-slate-800'
@@ -1415,7 +1521,7 @@ export const CustomMediaImportModal: React.FC<CustomMediaImportModalProps> = ({
                     setActiveResultTab('quiz');
                     setQuizSelectedIdx(null);
                   }}
-                  className={`px-3 py-1.2 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer transition-all ${
+                  className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer transition-all ${
                     activeResultTab === 'quiz'
                       ? 'bg-emerald-400 text-slate-950'
                       : 'bg-slate-900 text-emerald-300 border border-emerald-500/30'
@@ -1434,7 +1540,7 @@ export const CustomMediaImportModal: React.FC<CustomMediaImportModalProps> = ({
                       setExtractedLessons([]);
                       setStatusMessage('已重置為 AOI 預設教材庫。');
                     }}
-                    className="px-2.5 py-1.2 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 text-xs font-bold flex items-center gap-1 cursor-pointer transition-all"
+                    className="px-2.5 py-1.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 text-xs font-bold flex items-center gap-1 cursor-pointer transition-all"
                     title="重置導入資料"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
@@ -1621,9 +1727,9 @@ export const CustomMediaImportModal: React.FC<CustomMediaImportModalProps> = ({
                                     <button
                                       key={soundKey}
                                       onClick={() => handleSpeakSingleSound(syl.sound, soundKey)}
-                                      className={`flex-1 min-w-[72px] p-2 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                                      className={`flex-1 min-w-[72px] p-2 rounded-xl border text-left transition-colors cursor-pointer flex flex-col justify-between ${
                                         isSpeakingThis
-                                          ? 'bg-cyan-500/25 border-cyan-400 ring-1 ring-cyan-300 scale-[1.02]'
+                                          ? 'bg-cyan-500/25 border-cyan-400 ring-1 ring-cyan-300'
                                           : 'bg-slate-900/90 hover:bg-slate-800 border-slate-700/80 hover:border-cyan-500/50'
                                       }`}
                                       title={`點擊聆聽單音「${syl.sound}」`}
@@ -1751,14 +1857,16 @@ export const CustomMediaImportModal: React.FC<CustomMediaImportModalProps> = ({
                         </span>
                         <div className="flex items-center gap-1.5">
                           <button
+                            type="button"
                             onClick={() => {
                               playClickSound();
-                              speakEnglish(lesson.english_sentence, 0.65);
+                              speakEnglish(lesson.english_sentence, 0.7);
                             }}
-                            className="px-2.5 py-1 rounded-lg bg-amber-500/15 text-amber-300 border border-amber-500/30 text-xs font-mono font-bold flex items-center gap-1 cursor-pointer"
+                            className="px-2.5 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-xs font-mono font-bold flex items-center gap-1 cursor-pointer tabular-nums focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+                            title="以 0.7x 慢速朗讀"
                           >
                             <Volume2 className="w-3.5 h-3.5 text-amber-400" />
-                            <span>慢讀</span>
+                            <span>0.7x 慢讀</span>
                           </button>
                           <button
                             onClick={() => {
@@ -1805,14 +1913,14 @@ export const CustomMediaImportModal: React.FC<CustomMediaImportModalProps> = ({
               <div className="bg-slate-900/95 border border-emerald-500/40 rounded-2xl p-4 space-y-3">
                 <div className="flex items-center justify-between gap-2 flex-wrap border-b border-slate-800 pb-2.5">
                   <div className="flex items-center gap-2">
-                    <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-xs font-mono font-bold">
+                    <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-xs font-mono font-bold tabular-nums">
                       題目 {(quizIndex % quizPool.length) + 1} / {quizPool.length}
                     </span>
                     <span className="text-xs font-bold text-slate-300">
                       聽音與 KK音標辨識挑戰
                     </span>
                   </div>
-                  <span className="text-xs font-mono font-black text-amber-300">
+                  <span className="text-xs font-mono font-black text-amber-300 tabular-nums">
                     答對 {quizCorrectCount} / {quizTotalAttempts} 題
                   </span>
                 </div>

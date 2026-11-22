@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { UserDiagnostics } from '../types';
 import {
   getPendingOfflineSyncStats,
@@ -36,6 +36,19 @@ export function useOfflineSync(): UseOfflineSyncReturn {
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [syncSummary, setSyncSummary] = useState<SyncResultSummary | null>(null);
   const [isDismissed, setIsDismissed] = useState<boolean>(false);
+  const summaryTimerRef = useRef<number | null>(null);
+  const isMountedRef = useRef<boolean>(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      if (summaryTimerRef.current !== null) {
+        window.clearTimeout(summaryTimerRef.current);
+        summaryTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const refreshPendingStats = useCallback(async () => {
     try {
@@ -110,15 +123,23 @@ export function useOfflineSync(): UseOfflineSyncReturn {
           setStreakCount
         );
 
+        if (!isMountedRef.current) return result;
         setSyncSummary(result);
         playSuccessChime();
 
         // 重新整理統計
         await refreshPendingStats();
+        if (!isMountedRef.current) return result;
 
         // 5秒後自動隱藏成功提示
-        setTimeout(() => {
-          setSyncSummary(null);
+        if (summaryTimerRef.current !== null) {
+          window.clearTimeout(summaryTimerRef.current);
+        }
+        summaryTimerRef.current = window.setTimeout(() => {
+          summaryTimerRef.current = null;
+          if (isMountedRef.current) {
+            setSyncSummary(null);
+          }
         }, 5000);
 
         return result;
@@ -126,7 +147,9 @@ export function useOfflineSync(): UseOfflineSyncReturn {
         console.error("Offline sync failed:", err);
         return null;
       } finally {
-        setIsSyncing(false);
+        if (isMountedRef.current) {
+          setIsSyncing(false);
+        }
       }
     },
     [isOnline, isSyncing, refreshPendingStats]

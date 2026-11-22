@@ -48,10 +48,13 @@ export const WeeklyStatsChart: React.FC<WeeklyStatsChartProps> = ({ visitedCount
           </h3>
         </div>
 
-        <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800 self-start sm:self-auto">
+        <div role="tablist" aria-label="學習統計圖表指標" className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800 self-start sm:self-auto">
           <button
+            type="button"
+            role="tab"
+            aria-selected={metric === 'minutes'}
             onClick={() => setMetric('minutes')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
+            className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400 ${
               metric === 'minutes'
                 ? 'bg-yellow-400 text-indigo-950 shadow-md'
                 : 'text-slate-400 hover:text-white'
@@ -60,8 +63,11 @@ export const WeeklyStatsChart: React.FC<WeeklyStatsChartProps> = ({ visitedCount
             ⏱️ 練習分鐘數
           </button>
           <button
+            type="button"
+            role="tab"
+            aria-selected={metric === 'sentences'}
             onClick={() => setMetric('sentences')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
+            className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400 ${
               metric === 'sentences'
                 ? 'bg-yellow-400 text-indigo-950 shadow-md'
                 : 'text-slate-400 hover:text-white'
@@ -70,8 +76,11 @@ export const WeeklyStatsChart: React.FC<WeeklyStatsChartProps> = ({ visitedCount
             🧩 拆解金句數
           </button>
           <button
+            type="button"
+            role="tab"
+            aria-selected={metric === 'accuracy'}
             onClick={() => setMetric('accuracy')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
+            className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400 ${
               metric === 'accuracy'
                 ? 'bg-yellow-400 text-indigo-950 shadow-md'
                 : 'text-slate-400 hover:text-white'
@@ -89,7 +98,7 @@ export const WeeklyStatsChart: React.FC<WeeklyStatsChartProps> = ({ visitedCount
             <Clock className="w-3.5 h-3.5 text-cyan-400" />
             <span>本週練習總長</span>
           </div>
-          <div className="text-xl sm:text-2xl font-black text-cyan-300 font-mono">
+          <div className="text-xl sm:text-2xl font-black text-cyan-300 font-mono tabular-nums">
             {totalMinutes} <span className="text-xs font-sans text-slate-400">分鐘</span>
           </div>
         </div>
@@ -99,7 +108,7 @@ export const WeeklyStatsChart: React.FC<WeeklyStatsChartProps> = ({ visitedCount
             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
             <span>已研讀 & 快取</span>
           </div>
-          <div className="text-xl sm:text-2xl font-black text-emerald-300 font-mono">
+          <div className="text-xl sm:text-2xl font-black text-emerald-300 font-mono tabular-nums">
             {visitedCount} <span className="text-xs font-sans text-slate-400">句金句</span>
           </div>
         </div>
@@ -109,7 +118,7 @@ export const WeeklyStatsChart: React.FC<WeeklyStatsChartProps> = ({ visitedCount
             <TrendingUp className="w-3.5 h-3.5 text-yellow-400" />
             <span>SVO 平均正確率</span>
           </div>
-          <div className="text-xl sm:text-2xl font-black text-yellow-300 font-mono">
+          <div className="text-xl sm:text-2xl font-black text-yellow-300 font-mono tabular-nums">
             96% <span className="text-xs font-sans text-emerald-400 font-bold">+4%</span>
           </div>
         </div>
@@ -119,8 +128,8 @@ export const WeeklyStatsChart: React.FC<WeeklyStatsChartProps> = ({ visitedCount
             <WifiOff className="w-3.5 h-3.5 text-purple-400" />
             <span>無塵室離線模式</span>
           </div>
-          <div className="text-xs font-black text-purple-300 flex items-center gap-1 mt-1">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+          <div className="text-xs font-black text-purple-300 flex items-center gap-1.5 mt-1">
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
             <span>已就緒 (Offline Ready)</span>
           </div>
         </div>
@@ -200,7 +209,7 @@ export const WeeklyStatsChart: React.FC<WeeklyStatsChartProps> = ({ visitedCount
 
       <div className="text-[11px] text-slate-400 font-medium flex items-center justify-between border-t border-slate-800/80 pt-3">
         <span>💡 數據已自動儲存於瀏覽器 Local Storage 快取中</span>
-        <span className="text-cyan-400 font-bold">連續學習：{streakCount} 天 🔥</span>
+        <span className="text-cyan-400 font-bold tabular-nums">連續學習：{streakCount} 天 🔥</span>
       </div>
 
     </div>

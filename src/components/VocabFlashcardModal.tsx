@@ -1,11 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { VocabItem } from '../types';
-import { X, Volume2, Sparkles, ArrowLeft, ArrowRight, RotateCw, CheckCircle2, Bookmark, HelpCircle, Zap, Eye, EyeOff } from 'lucide-react';
-import { speakEnglish, speakChinese } from '../utils/speech';
+import { X, Volume2, Sparkles, ArrowLeft, ArrowRight, RotateCw, RotateCcw, CheckCircle2, Bookmark, HelpCircle, Zap, Eye, EyeOff } from 'lucide-react';
+import { speakEnglish, speakChinese, cancelSpeech } from '../utils/speech';
 import { playClickSound, playSuccessChime, playWaferSnapSound } from '../utils/audioEffects';
 import { convertPhoneticToZhuyin } from '../utils/zhuyinHelper';
 import { getWordKKPhonetic } from '../utils/wordDictionary';
 import { getExampleTranslation } from '../utils/exampleSentenceTranslator';
+import { queueAutoServerSync } from '../utils/serverSyncService';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface VocabFlashcardModalProps {
@@ -25,6 +26,7 @@ export const VocabFlashcardModal: React.FC<VocabFlashcardModalProps> = ({
 }) => {
   const [currentIndex, setCurrentIndex] = useState<number>(0);
   const [isFlipped, setIsFlipped] = useState<boolean>(false);
+  const [studyFilter, setStudyFilter] = useState<'all' | 'unmastered'>('all');
   const [masteredIds, setMasteredIds] = useState<string[]>(() => {
     try {
       const saved = localStorage.getItem('fab_flashcard_mastered');
@@ -34,21 +36,39 @@ export const VocabFlashcardModal: React.FC<VocabFlashcardModalProps> = ({
     }
   });
 
-  const currentVocab = vocabList[currentIndex] || vocabList[0];
+  const activeDeck = useMemo(() => {
+    if (studyFilter === 'unmastered') {
+      return vocabList.filter((v) => !masteredIds.includes(v.id));
+    }
+    return vocabList;
+  }, [vocabList, masteredIds, studyFilter]);
+
+  const safeIndex = activeDeck.length > 0 ? Math.min(currentIndex, activeDeck.length - 1) : 0;
+  const currentVocab = activeDeck[safeIndex] || null;
 
   useEffect(() => {
     setIsFlipped(false);
-  }, [currentIndex]);
+  }, [safeIndex, studyFilter]);
 
-  // Keyboard navigation: ArrowLeft, ArrowRight, Space (flip), KeyM (master)
+  // Cancel any active speech when modal closes or unmounts
   useEffect(() => {
-    if (!isOpen) return;
-
+    if (!isOpen) {
+      cancelSpeech();
+      return;
+    }
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowRight' || e.key === 'j') {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        cancelSpeech();
+        onClose();
+        return;
+      }
+      if (activeDeck.length === 0) return;
+      if (e.key === 'ArrowRight' || e.key.toLowerCase() === 'j') {
         e.preventDefault();
         handleNext();
-      } else if (e.key === 'ArrowLeft' || e.key === 'k') {
+      } else if (e.key === 'ArrowLeft' || e.key.toLowerCase() === 'k') {
         e.preventDefault();
         handlePrev();
       } else if (e.key === ' ' || e.key === 'Enter') {
@@ -60,31 +80,38 @@ export const VocabFlashcardModal: React.FC<VocabFlashcardModalProps> = ({
       } else if (e.key.toLowerCase() === 'p') {
         e.preventDefault();
         if (currentVocab) speakEnglish(currentVocab.word, speechSpeed);
+      } else if (e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        if (currentVocab) speakEnglish(currentVocab.word, 0.7);
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, currentIndex, vocabList, isFlipped, currentVocab, speechSpeed]);
+  }, [isOpen, safeIndex, activeDeck.length, isFlipped, currentVocab, speechSpeed, onClose]);
 
-  if (!isOpen || !currentVocab) return null;
+  if (!isOpen || vocabList.length === 0) return null;
 
   const handleNext = () => {
+    if (activeDeck.length === 0) return;
     playClickSound();
-    setCurrentIndex((prev) => (prev + 1) % vocabList.length);
+    setCurrentIndex((prev) => (prev + 1) % activeDeck.length);
   };
 
   const handlePrev = () => {
+    if (activeDeck.length === 0) return;
     playClickSound();
-    setCurrentIndex((prev) => (prev - 1 + vocabList.length) % vocabList.length);
+    setCurrentIndex((prev) => (prev - 1 + activeDeck.length) % activeDeck.length);
   };
 
   const handleFlip = () => {
+    if (!currentVocab) return;
     playWaferSnapSound();
     setIsFlipped((prev) => !prev);
   };
 
   const handleToggleMastered = () => {
+    if (!currentVocab) return;
     playSuccessChime();
     setMasteredIds((prev) => {
       const next = prev.includes(currentVocab.id)
@@ -93,66 +120,162 @@ export const VocabFlashcardModal: React.FC<VocabFlashcardModalProps> = ({
       try {
         localStorage.setItem('fab_flashcard_mastered', JSON.stringify(next));
       } catch {}
+      queueAutoServerSync(2500);
       return next;
     });
   };
 
-  const isCurrentMastered = masteredIds.includes(currentVocab.id);
+  const handleNeedMorePractice = () => {
+    if (!currentVocab) return;
+    playClickSound();
+    setMasteredIds((prev) => {
+      if (!prev.includes(currentVocab.id)) return prev;
+      const next = prev.filter((id) => id !== currentVocab.id);
+      try {
+        localStorage.setItem('fab_flashcard_mastered', JSON.stringify(next));
+      } catch {}
+      queueAutoServerSync(2500);
+      return next;
+    });
+    if (activeDeck.length > 1) {
+      setCurrentIndex((prev) => (prev + 1) % activeDeck.length);
+    } else {
+      setIsFlipped(false);
+    }
+  };
+
+  const isCurrentMastered = currentVocab ? masteredIds.includes(currentVocab.id) : false;
   const masteredCount = vocabList.filter((v) => masteredIds.includes(v.id)).length;
+  const unmasteredCount = Math.max(0, vocabList.length - masteredCount);
   const progressPercent = Math.round((masteredCount / vocabList.length) * 100) || 0;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in">
-      <div className="bg-slate-900 border-2 border-slate-700 rounded-3xl w-full max-w-xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="晶圓單字翻轉閃卡"
+      onClick={onClose}
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="bg-slate-900 border-2 border-slate-700 rounded-3xl w-full max-w-xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]"
+      >
         
         {/* Header */}
         <div className="p-4 sm:p-5 bg-slate-950/90 border-b border-slate-800 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 bg-amber-400 rounded-xl text-slate-950 font-black shadow-md">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="p-2 bg-amber-400 rounded-xl text-slate-950 font-black shadow-md shrink-0">
               <Sparkles className="w-5 h-5 text-slate-950" />
             </div>
-            <div>
-              <h2 className="text-base sm:text-lg font-black text-slate-100 flex items-center gap-2">
+            <div className="min-w-0">
+              <h2 className="text-base sm:text-lg font-black text-slate-100 flex items-baseline gap-2 flex-wrap">
                 <span>晶圓單字翻轉閃卡</span>
-                <span className="px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-700/80 text-[10px] font-mono">
-                  {currentIndex + 1} / {vocabList.length}
+                <span className="text-cyan-300 text-xs font-mono font-bold tabular-nums">
+                  · {activeDeck.length > 0 ? `${safeIndex + 1} / ${activeDeck.length}` : '0 / 0'}
                 </span>
               </h2>
-              <p className="text-xs text-slate-400">點擊卡片或按「空白鍵」翻轉，按方向鍵切換前後張</p>
+              <p className="text-xs text-slate-400 truncate">點擊卡片或按「空白鍵」翻轉，方向鍵切換前後張</p>
             </div>
           </div>
 
           <button
+            type="button"
+            aria-label="關閉閃卡"
             onClick={onClose}
-            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-all cursor-pointer"
+            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-all cursor-pointer shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+            title="關閉視窗 (Esc)"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Progress Bar */}
-        <div className="bg-slate-950 px-4 py-2 border-b border-slate-800/80 flex items-center justify-between text-xs font-mono text-slate-400">
-          <div className="flex items-center gap-2">
-            <span>已熟記:</span>
-            <span className="text-emerald-400 font-bold">{masteredCount}/{vocabList.length} ({progressPercent}%)</span>
+        {/* Filter & Progress Bar */}
+        <div className="bg-slate-950 px-4 py-2.5 border-b border-slate-800/80 flex items-center justify-between gap-2 flex-wrap text-xs font-mono text-slate-400 tabular-nums">
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              aria-pressed={studyFilter === 'all'}
+              onClick={() => {
+                playClickSound();
+                setStudyFilter('all');
+                setCurrentIndex(0);
+              }}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors cursor-pointer whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
+                studyFilter === 'all'
+                  ? 'bg-cyan-400 text-slate-950 font-black'
+                  : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
+              }`}
+            >
+              全部 ({vocabList.length})
+            </button>
+            <button
+              type="button"
+              aria-pressed={studyFilter === 'unmastered'}
+              onClick={() => {
+                playClickSound();
+                setStudyFilter('unmastered');
+                setCurrentIndex(0);
+              }}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors cursor-pointer whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${
+                studyFilter === 'unmastered'
+                  ? 'bg-amber-400 text-slate-950 font-black'
+                  : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
+              }`}
+            >
+              只練未熟記 ({unmasteredCount})
+            </button>
           </div>
-          <div className="w-32 bg-slate-800 h-2 rounded-full overflow-hidden">
-            <div
-              className="bg-emerald-400 h-full rounded-full transition-all duration-300"
-              style={{ width: `${progressPercent}%` }}
-            />
+
+          <div className="flex items-center gap-2">
+            <span>已熟記 <strong className="text-emerald-400">{masteredCount}/{vocabList.length}</strong> ({progressPercent}%)</span>
+            <div className="w-20 bg-slate-800 h-2 rounded-full overflow-hidden">
+              <div
+                className="bg-emerald-400 h-full rounded-full transition-all duration-300"
+                style={{ width: `${progressPercent}%` }}
+              />
+            </div>
           </div>
         </div>
 
-        {/* Flashcard Body (Interactive 3D Flip) */}
-        <div className="p-4 sm:p-6 flex-1 flex flex-col items-center justify-center min-h-[320px] select-none">
+        {/* Flashcard Body (Interactive 3D Flip or Empty Unmastered Completion) */}
+        <div className="p-4 sm:p-6 flex-1 flex flex-col items-center justify-center min-h-[320px] select-none overflow-y-auto">
+          {!currentVocab ? (
+            <div className="w-full rounded-3xl p-8 bg-slate-950 border border-emerald-500/40 text-center space-y-3">
+              <CheckCircle2 className="w-10 h-10 text-emerald-400 mx-auto" />
+              <h3 className="text-lg font-black text-emerald-300">太讚了！所有單字已標記熟記</h3>
+              <p className="text-xs text-slate-400">已將您的熟記進度排程雲端同步，可切回「全部單字」繼續複習例句。</p>
+              <button
+                type="button"
+                onClick={() => {
+                  playClickSound();
+                  setStudyFilter('all');
+                  setCurrentIndex(0);
+                }}
+                className="min-h-[40px] px-4 py-2 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-black text-xs cursor-pointer"
+              >
+                切回全部單字 ({vocabList.length})
+              </button>
+            </div>
+          ) : (
           <motion.div
             key={currentVocab.id + (isFlipped ? '-back' : '-front')}
+            role="button"
+            tabIndex={0}
+            aria-pressed={isFlipped}
+            aria-label="翻轉單字卡"
             initial={{ opacity: 0, scale: 0.96 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 0.2 }}
             onClick={handleFlip}
-            className={`w-full min-h-[260px] sm:min-h-[280px] rounded-3xl p-6 sm:p-8 flex flex-col items-center justify-between text-center cursor-pointer shadow-2xl transition-all border-2 relative ${
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                e.stopPropagation();
+                handleFlip();
+              }
+            }}
+            className={`w-full min-h-[260px] sm:min-h-[280px] rounded-3xl p-6 sm:p-8 flex flex-col items-center justify-between text-center cursor-pointer shadow-2xl transition-all border-2 relative focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${
               isFlipped
                 ? 'bg-gradient-to-br from-slate-900 via-indigo-950/80 to-slate-950 border-cyan-500/60 shadow-cyan-500/10'
                 : 'bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 border-amber-500/50 shadow-amber-500/10'
@@ -259,6 +382,18 @@ export const VocabFlashcardModal: React.FC<VocabFlashcardModalProps> = ({
                           onClick={(e) => {
                             e.stopPropagation();
                             playClickSound();
+                            speakEnglish(currentVocab.exampleSentence, 0.7);
+                          }}
+                          className="text-cyan-300 hover:text-cyan-100 cursor-pointer font-mono font-bold px-1.5 py-0.5 rounded bg-slate-900/80 border border-cyan-500/40 hover:bg-slate-800 transition-colors text-[10px] tabular-nums"
+                          title="0.7x 慢讀例句"
+                        >
+                          0.7x
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            playClickSound();
                             const zh = currentVocab.exampleTranslation || currentVocab.exampleSentenceZh || getExampleTranslation(currentVocab.exampleSentence, currentVocab.word);
                             speakChinese(zh);
                           }}
@@ -282,59 +417,92 @@ export const VocabFlashcardModal: React.FC<VocabFlashcardModalProps> = ({
             )}
 
             {/* Bottom Actions inside Card */}
-            <div className="w-full flex items-center justify-between pt-2 border-t border-slate-800/80 text-xs">
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  speakEnglish(currentVocab.word, speechSpeed);
-                }}
-                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 font-bold flex items-center gap-1.5 transition-all shadow-sm"
-              >
-                <Volume2 className="w-4 h-4 text-amber-400" />
-                <span>發音 (P)</span>
-              </button>
+            <div className="w-full flex items-center justify-between gap-2 pt-2 border-t border-slate-800/80 text-xs flex-wrap">
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    speakEnglish(currentVocab.word, speechSpeed);
+                  }}
+                  className="min-h-[38px] px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 font-bold flex items-center gap-1.5 transition-all shadow-sm whitespace-nowrap cursor-pointer"
+                >
+                  <Volume2 className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>發音 (P)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    playClickSound();
+                    speakEnglish(currentVocab.word, 0.7);
+                  }}
+                  className="min-h-[38px] px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 font-mono font-bold text-xs transition-all cursor-pointer tabular-nums whitespace-nowrap"
+                  title="0.7x 慢速發音"
+                >
+                  0.7x
+                </button>
+              </div>
 
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleToggleMastered();
-                }}
-                className={`px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5 transition-all shadow-sm ${
-                  isCurrentMastered
-                    ? 'bg-emerald-500 text-slate-950 shadow-emerald-500/30 font-black'
-                    : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
-                }`}
-              >
-                <CheckCircle2 className={`w-4 h-4 ${isCurrentMastered ? 'text-slate-950' : 'text-slate-400'}`} />
-                <span>{isCurrentMastered ? '已標記熟記 (M)' : '標為已熟記 (M)'}</span>
-              </button>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleNeedMorePractice();
+                  }}
+                  className="min-h-[38px] px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-rose-950/70 text-rose-300 border border-rose-500/40 font-bold flex items-center gap-1 transition-all cursor-pointer whitespace-nowrap"
+                  title="還不熟，稍後重複練習"
+                >
+                  <RotateCcw className="w-3.5 h-3.5 shrink-0" />
+                  <span>再練</span>
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={isCurrentMastered}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleToggleMastered();
+                  }}
+                  className={`min-h-[38px] px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5 transition-all shadow-sm whitespace-nowrap cursor-pointer ${
+                    isCurrentMastered
+                      ? 'bg-emerald-500 text-slate-950 shadow-emerald-500/30 font-black'
+                      : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
+                  }`}
+                >
+                  <CheckCircle2 className={`w-4 h-4 shrink-0 ${isCurrentMastered ? 'text-slate-950' : 'text-slate-400'}`} />
+                  <span>{isCurrentMastered ? '已熟記 (M)' : '標為熟記 (M)'}</span>
+                </button>
+              </div>
             </div>
           </motion.div>
+          )}
         </div>
 
         {/* Navigation Footer */}
         <div className="p-4 bg-slate-950 border-t border-slate-800 flex items-center justify-between gap-3">
           <button
+            type="button"
             onClick={handlePrev}
-            className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+            className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
           >
             <ArrowLeft className="w-4 h-4" />
             <span>上一張 (←)</span>
           </button>
 
           <button
+            type="button"
             onClick={handleFlip}
-            className="px-5 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-md shadow-amber-500/20 transition-all cursor-pointer"
+            className="px-5 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-md shadow-amber-500/20 transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
           >
             <RotateCw className="w-4 h-4" />
             <span>{isFlipped ? '看正面 (空白鍵)' : '看解答 (空白鍵)'}</span>
           </button>
 
           <button
+            type="button"
             onClick={handleNext}
-            className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+            className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
           >
             <span>下一張 (→)</span>
             <ArrowRight className="w-4 h-4" />

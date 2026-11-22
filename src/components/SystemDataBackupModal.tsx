@@ -20,6 +20,13 @@ import {
 import { Lesson, ShiftSettings, UserDiagnostics } from '../types';
 import { playClickSound, playSuccessChime } from '../utils/audioEffects';
 import { auditAndConvertImportedData } from '../utils/pipSanitizer';
+import {
+  loadPronunciationAnalytics,
+  savePronunciationAnalytics,
+  mergePronunciationAnalytics
+} from '../utils/pronunciationAnalytics';
+import { getStoredGlobalSpeechSpeed, saveGlobalSpeechSpeed } from '../utils/speechSpeedCalibrator';
+import { getStoredNoiseSuppressionConfig, saveNoiseSuppressionConfig } from '../utils/cleanroomNoiseReducer';
 
 interface SystemDataBackupModalProps {
   isOpen: boolean;
@@ -56,6 +63,15 @@ export const SystemDataBackupModal: React.FC<SystemDataBackupModalProps> = ({
   const [restoreJsonInput, setRestoreJsonInput] = useState('');
   const [restoreError, setRestoreError] = useState<string | null>(null);
   const [restoreSuccess, setRestoreSuccess] = useState(false);
+  const copyTimerRef = React.useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+    };
+  }, []);
 
   // System Health States
   const [apiHealth, setApiHealth] = useState<'checking' | 'healthy' | 'warning'>('checking');
@@ -89,34 +105,69 @@ export const SystemDataBackupModal: React.FC<SystemDataBackupModalProps> = ({
     }
 
     // 3. Ping Server Health
+    const controller = new AbortController();
     const start = performance.now();
-    fetch('/api/health')
+    fetch('/api/health', { signal: controller.signal })
       .then((res) => res.json())
       .then(() => {
+        if (controller.signal.aborted) return;
         const end = performance.now();
         setApiLatency(Math.round(end - start));
         setApiHealth('healthy');
       })
       .catch(() => {
+        if (controller.signal.aborted) return;
         setApiHealth('warning');
         setApiLatency(null);
       });
+    return () => controller.abort();
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
-  // Generate full backup object
-  const getBackupData = () => ({
-    version: '2.0',
-    exportDate: new Date().toISOString(),
-    appName: 'FSE 每日晶圓級英文導師',
-    streakCount,
-    bookmarkedLessons,
-    visitedLessonIds,
-    readArticleIds,
-    shiftSettings,
-    diagnostics
-  });
+  // Generate full backup object (v2.2: includes pronunciation analytics, voice speed & noise config)
+  const getBackupData = () => {
+    let shadowingScores: Record<string, number> | undefined;
+    let srsMemory: Record<string, unknown> | undefined;
+    let noteTimestamps: Record<string, number> | undefined;
+    try {
+      const shRaw = localStorage.getItem('fse_shadowing_scores_v1');
+      if (shRaw) shadowingScores = JSON.parse(shRaw);
+      const srsRaw = localStorage.getItem('fse_srs_memory_v1');
+      if (srsRaw) srsMemory = JSON.parse(srsRaw);
+      const tsRaw = localStorage.getItem('fse_note_timestamps_v1');
+      if (tsRaw) noteTimestamps = JSON.parse(tsRaw);
+    } catch {}
+    return {
+      version: '2.2',
+      exportDate: new Date().toISOString(),
+      appName: 'FSE 每日晶圓級英文導師',
+      streakCount,
+      bookmarkedLessons,
+      visitedLessonIds,
+      readArticleIds,
+      shiftSettings,
+      diagnostics,
+      shadowingScores,
+      srsMemory,
+      noteTimestamps,
+      pronunciationAnalytics: loadPronunciationAnalytics(),
+      speechSpeed: getStoredGlobalSpeechSpeed(0.85),
+      noiseSuppressionConfig: getStoredNoiseSuppressionConfig(),
+    };
+  };
 
   const handleDownloadBackup = () => {
     playClickSound();
@@ -136,23 +187,32 @@ export const SystemDataBackupModal: React.FC<SystemDataBackupModalProps> = ({
   const handleCopyBackup = () => {
     playClickSound();
     const dataStr = JSON.stringify(getBackupData());
-    navigator.clipboard.writeText(dataStr);
-    setCopied(true);
-    playSuccessChime();
-    setTimeout(() => setCopied(false), 2500);
+    try {
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        navigator.clipboard.writeText(dataStr).catch(() => {});
+      }
+      setCopied(true);
+      playSuccessChime();
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+      copyTimerRef.current = window.setTimeout(() => {
+        copyTimerRef.current = null;
+        setCopied(false);
+      }, 2500);
+    } catch {}
   };
 
-  const handleRestore = () => {
-    playClickSound();
+  const applyRestoreJsonString = (rawText: string) => {
     setRestoreError(null);
     setRestoreSuccess(false);
 
     try {
-      if (!restoreJsonInput.trim()) {
-        setRestoreError('請先貼上有效的備份 JSON 字串');
+      if (!rawText.trim()) {
+        setRestoreError('請先貼上或選擇有效的備份 JSON 檔案');
         return;
       }
-      const parsed = JSON.parse(restoreJsonInput.trim());
+      const parsed = JSON.parse(rawText.trim());
       if (typeof parsed !== 'object' || !parsed) {
         throw new Error('格式錯誤：非有效的備份物件');
       }
@@ -160,6 +220,42 @@ export const SystemDataBackupModal: React.FC<SystemDataBackupModalProps> = ({
       const sanitizedBookmarks = Array.isArray(parsed.bookmarkedLessons)
         ? auditAndConvertImportedData([], parsed.bookmarkedLessons).lessons
         : undefined;
+
+      if (parsed.shadowingScores && typeof parsed.shadowingScores === 'object') {
+        try {
+          localStorage.setItem('fse_shadowing_scores_v1', JSON.stringify(parsed.shadowingScores));
+        } catch {}
+      }
+      if (parsed.srsMemory && typeof parsed.srsMemory === 'object') {
+        try {
+          localStorage.setItem('fse_srs_memory_v1', JSON.stringify(parsed.srsMemory));
+          window.dispatchEvent(new CustomEvent('fse-srs-updated'));
+        } catch {}
+      }
+      if (parsed.noteTimestamps && typeof parsed.noteTimestamps === 'object') {
+        try {
+          localStorage.setItem('fse_note_timestamps_v1', JSON.stringify(parsed.noteTimestamps));
+        } catch {}
+      }
+      if (parsed.pronunciationAnalytics && typeof parsed.pronunciationAnalytics === 'object') {
+        const merged = mergePronunciationAnalytics(
+          loadPronunciationAnalytics(),
+          parsed.pronunciationAnalytics
+        );
+        savePronunciationAnalytics(merged);
+      }
+      if (typeof parsed.speechSpeed === 'number' && Number.isFinite(parsed.speechSpeed)) {
+        saveGlobalSpeechSpeed(parsed.speechSpeed);
+        try {
+          localStorage.setItem('fse_speech_speed_updated_at', String(Date.now()));
+        } catch {}
+      }
+      if (parsed.noiseSuppressionConfig && typeof parsed.noiseSuppressionConfig === 'object') {
+        const cfg = parsed.noiseSuppressionConfig;
+        if (typeof cfg.enabled === 'boolean' && (cfg.level === 'standard' || cfg.level === 'strong')) {
+          saveNoiseSuppressionConfig({ enabled: cfg.enabled, level: cfg.level });
+        }
+      }
 
       onRestoreData({
         streakCount: typeof parsed.streakCount === 'number' ? parsed.streakCount : undefined,
@@ -178,10 +274,33 @@ export const SystemDataBackupModal: React.FC<SystemDataBackupModalProps> = ({
     }
   };
 
+  const handleRestore = () => {
+    playClickSound();
+    applyRestoreJsonString(restoreJsonInput);
+  };
+
+  const handleUploadBackupFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const content = typeof reader.result === 'string' ? reader.result : '';
+      applyRestoreJsonString(content);
+    };
+    reader.onerror = () => {
+      setRestoreError('讀取備份檔案失敗，請確認檔案格式是否正確');
+    };
+    reader.readAsText(file, 'utf-8');
+    e.target.value = '';
+  };
+
   return (
     <AnimatePresence>
       <div
         id="system-backup-modal-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-label="系統強化維護與數據中心"
         className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-md"
         onClick={onClose}
       >
@@ -214,24 +333,30 @@ export const SystemDataBackupModal: React.FC<SystemDataBackupModalProps> = ({
             </div>
 
             <button
+              type="button"
+              aria-label="關閉系統備份中心"
               onClick={() => {
                 playClickSound();
                 onClose();
               }}
-              className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors cursor-pointer"
+              className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+              title="關閉視窗 (Esc)"
             >
               <X className="w-4 h-4" />
             </button>
           </div>
 
           {/* Subtabs */}
-          <div className="flex items-center gap-2 mt-4 p-1 bg-slate-950/70 rounded-xl border border-slate-800">
+          <div role="tablist" aria-label="維護與健康檢查分頁" className="flex items-center gap-2 mt-4 p-1 bg-slate-950/70 rounded-xl border border-slate-800">
             <button
+              type="button"
+              role="tab"
+              aria-selected={activeSubTab === 'backup'}
               onClick={() => {
                 playClickSound();
                 setActiveSubTab('backup');
               }}
-              className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+              className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
                 activeSubTab === 'backup'
                   ? 'bg-cyan-400 text-slate-950 shadow-md font-black'
                   : 'text-slate-400 hover:text-slate-200'
@@ -242,11 +367,14 @@ export const SystemDataBackupModal: React.FC<SystemDataBackupModalProps> = ({
             </button>
 
             <button
+              type="button"
+              role="tab"
+              aria-selected={activeSubTab === 'health'}
               onClick={() => {
                 playClickSound();
                 setActiveSubTab('health');
               }}
-              className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+              className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
                 activeSubTab === 'health'
                   ? 'bg-cyan-400 text-slate-950 shadow-md font-black'
                   : 'text-slate-400 hover:text-slate-200'
@@ -261,7 +389,7 @@ export const SystemDataBackupModal: React.FC<SystemDataBackupModalProps> = ({
           {activeSubTab === 'backup' && (
             <div className="mt-5 space-y-5 text-xs">
               {/* Summary Stats Card */}
-              <div className="grid grid-cols-3 gap-2.5 p-3.5 bg-slate-950/90 rounded-2xl border border-slate-800">
+              <div className="grid grid-cols-3 gap-2.5 p-3.5 bg-slate-950/90 rounded-2xl border border-slate-800 tabular-nums">
                 <div className="text-center">
                   <div className="text-slate-400 text-[10px]">連續打卡</div>
                   <div className="text-sm sm:text-base font-black text-amber-300 font-mono mt-0.5">{streakCount} 天</div>
@@ -287,15 +415,17 @@ export const SystemDataBackupModal: React.FC<SystemDataBackupModalProps> = ({
                 </p>
                 <div className="flex flex-wrap gap-2 pt-1">
                   <button
+                    type="button"
                     onClick={handleDownloadBackup}
-                    className="flex-1 py-2 px-3 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black flex items-center justify-center gap-1.5 transition-all shadow-md cursor-pointer"
+                    className="flex-1 py-2 px-3 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black flex items-center justify-center gap-1.5 transition-all shadow-md cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300"
                   >
                     <Download className="w-3.5 h-3.5" />
                     <span>下載備份檔</span>
                   </button>
                   <button
+                    type="button"
                     onClick={handleCopyBackup}
-                    className="py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold flex items-center justify-center gap-1.5 border border-slate-700 transition-all cursor-pointer"
+                    className="py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold flex items-center justify-center gap-1.5 border border-slate-700 transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
                   >
                     {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-slate-300" />}
                     <span>{copied ? '已複製到剪貼簿' : '複製備份代碼'}</span>
@@ -330,14 +460,27 @@ export const SystemDataBackupModal: React.FC<SystemDataBackupModalProps> = ({
                   </div>
                 )}
 
-                <button
-                  onClick={handleRestore}
-                  disabled={!restoreJsonInput.trim()}
-                  className="w-full py-2 px-3 rounded-xl bg-amber-400 hover:bg-amber-300 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-black flex items-center justify-center gap-1.5 transition-all shadow-md cursor-pointer"
-                >
-                  <Upload className="w-3.5 h-3.5" />
-                  <span>驗證並匯入學習紀錄</span>
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  <label className="py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap">
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>選擇 .json 檔案匯入</span>
+                    <input
+                      type="file"
+                      accept=".json,application/json"
+                      onChange={handleUploadBackupFile}
+                      className="hidden"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleRestore}
+                    disabled={!restoreJsonInput.trim()}
+                    className="flex-1 py-2 px-3 rounded-xl bg-amber-400 hover:bg-amber-300 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-black flex items-center justify-center gap-1.5 transition-all shadow-md cursor-pointer"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>驗證並匯入文字紀錄</span>
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -350,13 +493,13 @@ export const SystemDataBackupModal: React.FC<SystemDataBackupModalProps> = ({
                 <div className="p-3.5 bg-slate-950/80 rounded-2xl border border-slate-800 space-y-1.5">
                   <div className="flex items-center justify-between">
                     <span className="text-slate-400 font-bold">Gemini AI 後端服務</span>
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                    <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
                       apiHealth === 'healthy' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-amber-500/20 text-amber-400'
                     }`}>
                       {apiHealth === 'healthy' ? '正常連線' : '檢查中'}
                     </span>
                   </div>
-                  <div className="text-sm font-mono font-bold text-slate-200">
+                  <div className="text-sm font-mono font-bold text-slate-200 tabular-nums">
                     {apiLatency !== null ? `${apiLatency} ms 響應延遲` : '即時監測中'}
                   </div>
                   <p className="text-[10px] text-slate-500">
@@ -368,11 +511,11 @@ export const SystemDataBackupModal: React.FC<SystemDataBackupModalProps> = ({
                 <div className="p-3.5 bg-slate-950/80 rounded-2xl border border-slate-800 space-y-1.5">
                   <div className="flex items-center justify-between">
                     <span className="text-slate-400 font-bold">語音發音引擎</span>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">
+                    <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">
                       Web Speech API
                     </span>
                   </div>
-                  <div className="text-sm font-mono font-bold text-slate-200 truncate">
+                  <div className="text-sm font-mono font-bold text-slate-200 truncate tabular-nums">
                     {speechEngineStatus}
                   </div>
                   <p className="text-[10px] text-slate-500">
@@ -384,11 +527,11 @@ export const SystemDataBackupModal: React.FC<SystemDataBackupModalProps> = ({
                 <div className="p-3.5 bg-slate-950/80 rounded-2xl border border-slate-800 space-y-1.5">
                   <div className="flex items-center justify-between">
                     <span className="text-slate-400 font-bold">本機快取占用</span>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-800 text-slate-300">
+                    <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-800 text-slate-300">
                       LocalStorage
                     </span>
                   </div>
-                  <div className="text-sm font-mono font-bold text-slate-200">
+                  <div className="text-sm font-mono font-bold text-slate-200 tabular-nums">
                     約 {storageUsedKb} KB / 5 MB
                   </div>
                   <p className="text-[10px] text-slate-500">
@@ -400,7 +543,7 @@ export const SystemDataBackupModal: React.FC<SystemDataBackupModalProps> = ({
                 <div className="p-3.5 bg-slate-950/80 rounded-2xl border border-slate-800 space-y-1.5">
                   <div className="flex items-center justify-between">
                     <span className="text-slate-400 font-bold">無塵室離線 PWA</span>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                    <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
                       已啟用
                     </span>
                   </div>
@@ -429,11 +572,12 @@ export const SystemDataBackupModal: React.FC<SystemDataBackupModalProps> = ({
               FSE System Architecture 2026
             </span>
             <button
+              type="button"
               onClick={() => {
                 playClickSound();
                 onClose();
               }}
-              className="px-4 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition-all cursor-pointer"
+              className="px-4 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
             >
               完成關閉
             </button>

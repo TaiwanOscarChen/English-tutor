@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { FAB_VOCAB } from '../data/fabVocab';
 import { VocabItem, UserDiagnostics } from '../types';
-import { Search, Volume2, BookOpen, Filter, Sparkles, Zap, Timer, CheckCircle2, XCircle, Trophy, RefreshCw, X, Flame, ShieldAlert, Award, Edit3, Gamepad2, FileText, StickyNote, Copy, Check, Layers, Cpu, Activity, Wrench, Upload, FolderOpen } from 'lucide-react';
-import { speakEnglish, speakSingleEnglishWord, speakEnhancedPronunciation, speakChinese } from '../utils/speech';
+import { Search, Volume2, Zap, Timer, CheckCircle2, XCircle, Trophy, RefreshCw, X, ShieldAlert, Gamepad2, FileText, StickyNote, Copy, Check, Layers, Cpu, Activity, Wrench, Upload, FolderOpen, ChevronDown, SlidersHorizontal, Square } from 'lucide-react';
+import { speakEnglish, speakSingleEnglishWord, speakChinese, cancelSpeech } from '../utils/speech';
 import { getMandarinPhoneticFromSentence } from '../utils/lessonSentenceHelper';
 import { convertPhoneticToZhuyin } from '../utils/zhuyinHelper';
 import { lookupWord, getWordKKPhonetic } from '../utils/wordDictionary';
@@ -13,6 +13,7 @@ import { VocabNoteModal } from './VocabNoteModal';
 import { VocabMatchGameModal } from './VocabMatchGameModal';
 import { VocabFlashcardModal } from './VocabFlashcardModal';
 import { InteractiveSentenceViewer } from './InteractiveSentenceViewer';
+import { queueAutoServerSync } from '../utils/serverSyncService';
 
 interface FabVocabBankProps {
   speechSpeed: number;
@@ -41,6 +42,7 @@ interface AnswerRecord {
 }
 
 const LOCAL_STORAGE_NOTES_KEY = 'fab_fse_vocab_notes';
+const LOCAL_STORAGE_MASTERED_KEY = 'fse_mastered_vocab_ids';
 
 export const FabVocabBank: React.FC<FabVocabBankProps> = ({
   speechSpeed,
@@ -52,9 +54,79 @@ export const FabVocabBank: React.FC<FabVocabBankProps> = ({
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [masteryFilter, setMasteryFilter] = useState<'all' | 'pending' | 'mastered'>('all');
+  const [masteredIds, setMasteredIds] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem(LOCAL_STORAGE_MASTERED_KEY);
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
   const [viewDensity, setViewDensity] = useState<'compact' | 'normal'>('normal');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [expandedSentenceId, setExpandedSentenceId] = useState<string | null>(null);
+  const [expandedPhonicsIds, setExpandedPhonicsIds] = useState<Record<string, boolean>>({});
+  const [openMoreCardId, setOpenMoreCardId] = useState<string | null>(null);
+  const [showStudyTools, setShowStudyTools] = useState<boolean>(false);
+  const [activePhonicsWordId, setActivePhonicsWordId] = useState<string | null>(null);
+
+  const phonicsSessionRef = useRef<number>(0);
+  const phonicsTimerRef = useRef<number | null>(null);
+  const challengeTimerRef = useRef<number | null>(null);
+  const copyTimerRef = useRef<number | null>(null);
+
+  const stopPhonicsSequence = () => {
+    phonicsSessionRef.current += 1;
+    if (phonicsTimerRef.current !== null) {
+      window.clearTimeout(phonicsTimerRef.current);
+      phonicsTimerRef.current = null;
+    }
+    setActivePhonicsWordId(null);
+  };
+
+  useEffect(() => {
+    return () => {
+      phonicsSessionRef.current += 1;
+      if (phonicsTimerRef.current !== null) {
+        window.clearTimeout(phonicsTimerRef.current);
+      }
+      if (challengeTimerRef.current !== null) {
+        window.clearTimeout(challengeTimerRef.current);
+      }
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+      cancelSpeech();
+    };
+  }, []);
+
+  useEffect(() => {
+    stopPhonicsSequence();
+    cancelSpeech();
+  }, [selectedCategory, searchTerm]);
+
+  useEffect(() => {
+    if (!openMoreCardId) return;
+    const handleOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target?.closest('[data-vocab-more-menu]')) {
+        setOpenMoreCardId(null);
+      }
+    };
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setOpenMoreCardId(null);
+      }
+    };
+    document.addEventListener('mousedown', handleOutside);
+    window.addEventListener('keydown', handleEsc);
+    return () => {
+      document.removeEventListener('mousedown', handleOutside);
+      window.removeEventListener('keydown', handleEsc);
+    };
+  }, [openMoreCardId]);
 
   // Personal Notes State from localStorage
   const [userNotes, setUserNotes] = useState<Record<string, string>>(() => {
@@ -96,6 +168,7 @@ export const FabVocabBank: React.FC<FabVocabBankProps> = ({
     setUserNotes(updated);
     try {
       localStorage.setItem(LOCAL_STORAGE_NOTES_KEY, JSON.stringify(updated));
+      queueAutoServerSync(2500);
     } catch (e) {
       console.error('Failed to persist vocab notes to localStorage', e);
     }
@@ -108,9 +181,14 @@ export const FabVocabBank: React.FC<FabVocabBankProps> = ({
     const cleanTrans = item.translation.replace(/\s*[\(（][^\)）]*[\)）]/g, '').trim() || item.translation;
     const textToCopy = `${item.word} ${kk} (${item.partOfSpeech}) - ${cleanTrans}\n例句: ${item.exampleSentence}\n${item.exampleTranslation || item.exampleSentenceZh || ''}`;
     try {
-      navigator.clipboard.writeText(textToCopy);
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        navigator.clipboard.writeText(textToCopy).catch(() => {});
+      }
       setCopiedId(item.id);
-      setTimeout(() => setCopiedId(null), 1800);
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+      copyTimerRef.current = window.setTimeout(() => setCopiedId(null), 1800);
     } catch {}
   };
 
@@ -135,6 +213,21 @@ export const FabVocabBank: React.FC<FabVocabBankProps> = ({
     return combined;
   }, [autoVocab, importedVocab]);
 
+  const handleToggleMastered = (vocabId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    playClickSound();
+    setMasteredIds((prev) => {
+      const exists = prev.includes(vocabId);
+      const next = exists ? prev.filter((id) => id !== vocabId) : [...prev, vocabId];
+      if (!exists) playSuccessChime();
+      try {
+        localStorage.setItem(LOCAL_STORAGE_MASTERED_KEY, JSON.stringify(next));
+        queueAutoServerSync(2500);
+      } catch {}
+      return next;
+    });
+  };
+
   const filteredVocab = allVocabList.filter((item) => {
     const exZh = item.exampleTranslation || item.exampleSentenceZh || '';
     const matchesSearch =
@@ -149,7 +242,13 @@ export const FabVocabBank: React.FC<FabVocabBankProps> = ({
       selectedCategory === 'all' ||
       (selectedCategory === 'imported' ? Boolean(item.isImported || item.category === 'imported') : item.category === selectedCategory);
 
-    return matchesSearch && matchesCategory;
+    const isMastered = masteredIds.includes(item.id);
+    const matchesMastery =
+      masteryFilter === 'all' ||
+      (masteryFilter === 'mastered' && isMastered) ||
+      (masteryFilter === 'pending' && !isMastered);
+
+    return matchesSearch && matchesCategory && matchesMastery;
   });
 
   // Generate Flash Challenge Quiz Questions
@@ -242,6 +341,41 @@ export const FabVocabBank: React.FC<FabVocabBankProps> = ({
     return () => clearInterval(timer);
   }, [isChallengeActive, showResults, isAnswered, timeLeft]);
 
+  // Challenge Modal Escape & Quick Answer Keyboard Shortcuts (1-4, P, S)
+  useEffect(() => {
+    if (!isChallengeActive) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        if (challengeTimerRef.current !== null) {
+          window.clearTimeout(challengeTimerRef.current);
+          challengeTimerRef.current = null;
+        }
+        setIsChallengeActive(false);
+        return;
+      }
+      if (showResults) return;
+      const curQ = challengeQuestions[currentQuestionIdx];
+      if (!curQ) return;
+      if (!isAnswered && ['1', '2', '3', '4'].includes(e.key)) {
+        const idx = Number(e.key) - 1;
+        if (idx >= 0 && idx < curQ.options.length) {
+          e.preventDefault();
+          handleAnswerOption(idx);
+        }
+      } else if (e.key.toLowerCase() === 'p') {
+        e.preventDefault();
+        speakEnglish(curQ.vocabItem.word, speechSpeed);
+      } else if (e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        speakEnglish(curQ.vocabItem.word, 0.7);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isChallengeActive, showResults, isAnswered, challengeQuestions, currentQuestionIdx, speechSpeed]);
+
   // Answer Option Handler
   const handleAnswerOption = (optionIdx: number) => {
     if (isAnswered) return;
@@ -282,7 +416,11 @@ export const FabVocabBank: React.FC<FabVocabBankProps> = ({
     setUserAnswers(nextAnswers);
 
     // Advance to next question or complete challenge
-    setTimeout(() => {
+    if (challengeTimerRef.current !== null) {
+      window.clearTimeout(challengeTimerRef.current);
+    }
+    challengeTimerRef.current = window.setTimeout(() => {
+      challengeTimerRef.current = null;
       if (currentQuestionIdx + 1 < challengeQuestions.length) {
         setCurrentQuestionIdx((prev) => prev + 1);
         setTimeLeft(8);
@@ -327,9 +465,9 @@ export const FabVocabBank: React.FC<FabVocabBankProps> = ({
 
   return (
     <div className="space-y-2.5 max-w-6xl mx-auto animate-fade-in w-full min-w-0 relative">
-      {/* Top Search & Interactive Cleanroom Console */}
-      <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-3 sm:p-3.5 space-y-2.5 backdrop-blur-md shadow-xl relative overflow-hidden litho-laser-line">
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+      {/* Top Search & Collapsible Study Tools Console */}
+      <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-3 sm:p-3.5 space-y-2.5 backdrop-blur-md shadow-xl">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
           {/* Search Box */}
           <div className="relative flex-1">
             <Search className="w-4 h-4 text-cyan-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
@@ -337,74 +475,125 @@ export const FabVocabBank: React.FC<FabVocabBankProps> = ({
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="搜尋半導體單字、中譯或諧音 (如 slurry, calibrate, chamber)..."
+              placeholder="搜尋半導體單字、中譯或諧音..."
               className="w-full pl-9 pr-8 py-2 bg-slate-950 border border-slate-800 focus:border-cyan-400 rounded-xl text-xs sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-cyan-400/50 transition-all font-sans"
             />
             {searchTerm && (
               <button
+                type="button"
                 onClick={() => setSearchTerm('')}
                 className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-white cursor-pointer rounded-md hover:bg-slate-800 transition-colors"
-                title="清除搜尋"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
             )}
           </div>
 
-          {/* Quick Study Aids Launcher Tools */}
-          <div className="flex items-center gap-1.5 shrink-0 overflow-x-auto no-scrollbar">
-            {onOpenMediaImportModal && (
-              <button
-                onClick={() => {
-                  playClickSound();
-                  onOpenMediaImportModal();
-                }}
-                className="px-2.5 py-1.5 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-200 border border-cyan-500/40 text-xs font-mono font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-95"
-                title="導入照片或檔案，將資料內的英文加入學習單音庫"
-              >
-                <Upload className="w-3.5 h-3.5 text-cyan-400" />
-                <span>導入單音</span>
-              </button>
-            )}
-
-            <button
-              onClick={() => {
-                playClickSound();
-                setIsFlashcardOpen(true);
-              }}
-              className="px-2.5 py-1.5 rounded-xl bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-300 border border-indigo-500/30 text-xs font-mono font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-95"
-              title="晶圓單字翻卡記憶模式"
-            >
-              <FileText className="w-3.5 h-3.5 text-indigo-400" />
-              <span>翻卡</span>
-            </button>
-
-            <button
-              onClick={() => {
-                playClickSound();
-                setIsMatchGameOpen(true);
-              }}
-              className="px-2.5 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 text-xs font-mono font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-95"
-              title="單字配對挑戰遊戲"
-            >
-              <Gamepad2 className="w-3.5 h-3.5 text-emerald-400" />
-              <span>配對</span>
-            </button>
-
-            <button
-              onClick={handleStartChallenge}
-              className="px-2.5 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-xs font-mono font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-95"
-              title="單字限時快閃測驗"
-            >
-              <Zap className="w-3.5 h-3.5 text-amber-400" />
-              <span>快閃</span>
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => {
+              playClickSound();
+              setShowStudyTools((prev) => !prev);
+            }}
+            className={`px-3 py-2 rounded-xl text-xs font-mono font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer border whitespace-nowrap shrink-0 ${
+              showStudyTools
+                ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/50'
+                : 'bg-slate-950 text-slate-200 hover:text-white border-slate-800 hover:border-slate-700'
+            }`}
+          >
+            <SlidersHorizontal className="w-3.5 h-3.5 text-cyan-400" />
+            <span>練習工具 {showStudyTools ? '▴' : '▾'}</span>
+          </button>
         </div>
 
-        {/* Category Pills Filter with Clean Vector Icons & Counts */}
-        <div className="flex items-center justify-between gap-2.5 flex-wrap pt-2 border-t border-slate-800/80">
-          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 min-w-0 flex-1 w-full sm:w-auto">
+        {/* Collapsible Quick Study Aids Drawer */}
+        {showStudyTools && (
+          <div className="pt-2 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-1.5">
+              {onOpenMediaImportModal && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    playClickSound();
+                    onOpenMediaImportModal();
+                  }}
+                  className="px-2.5 py-1.5 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-200 border border-cyan-500/40 text-xs font-mono font-bold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap"
+                >
+                  <Upload className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>導入單音</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => {
+                  playClickSound();
+                  setIsFlashcardOpen(true);
+                }}
+                className="px-2.5 py-1.5 rounded-xl bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-300 border border-indigo-500/30 text-xs font-mono font-bold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap"
+              >
+                <FileText className="w-3.5 h-3.5 text-indigo-400" />
+                <span>翻卡</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  playClickSound();
+                  setIsMatchGameOpen(true);
+                }}
+                className="px-2.5 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 text-xs font-mono font-bold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap"
+              >
+                <Gamepad2 className="w-3.5 h-3.5 text-emerald-400" />
+                <span>配對</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleStartChallenge}
+                className="px-2.5 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-xs font-mono font-bold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap"
+              >
+                <Zap className="w-3.5 h-3.5 text-amber-400" />
+                <span>快閃</span>
+              </button>
+            </div>
+
+            <div className="hidden sm:flex items-center bg-slate-950 border border-slate-800 rounded-xl p-0.5 text-[11px] font-mono">
+              <button
+                type="button"
+                onClick={() => {
+                  playClickSound();
+                  setViewDensity('compact');
+                }}
+                className={`px-2.5 py-1 rounded-lg cursor-pointer transition-all font-bold whitespace-nowrap ${
+                  viewDensity === 'compact'
+                    ? 'bg-cyan-500/20 text-cyan-300 shadow-xs'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                3 欄
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  playClickSound();
+                  setViewDensity('normal');
+                }}
+                className={`px-2.5 py-1 rounded-lg cursor-pointer transition-all font-bold whitespace-nowrap ${
+                  viewDensity === 'normal'
+                    ? 'bg-cyan-500/20 text-cyan-300 shadow-xs'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                2 欄
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Category Pills Filter */}
+        <div className="flex items-center justify-between gap-2.5 pt-2 border-t border-slate-800/80">
+          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 min-w-0 flex-1">
             {[
               { id: 'all', label: '全部', icon: Layers },
               { id: 'imported', label: '導入', icon: FolderOpen },
@@ -425,6 +614,7 @@ export const FabVocabBank: React.FC<FabVocabBankProps> = ({
               return (
                 <button
                   key={cat.id}
+                  type="button"
                   onClick={() => {
                     playClickSound();
                     setSelectedCategory(cat.id);
@@ -438,7 +628,7 @@ export const FabVocabBank: React.FC<FabVocabBankProps> = ({
                   <Icon className={`w-3.5 h-3.5 ${isSelected ? 'text-slate-950 stroke-[2.5]' : 'text-slate-400'}`} />
                   <span className="font-sans font-bold tracking-tight">{cat.label}</span>
                   <span
-                    className={`ml-0.5 text-[10px] px-1.5 py-0.2 rounded-md font-mono font-bold leading-none inline-flex items-center justify-center min-w-[20px] ${
+                    className={`ml-0.5 text-[10px] px-1.5 py-0.5 rounded-md font-mono font-bold leading-none inline-flex items-center justify-center min-w-[20px] ${
                       isSelected
                         ? 'bg-slate-950/20 text-slate-950'
                         : 'bg-slate-800/80 text-slate-400'
@@ -451,41 +641,32 @@ export const FabVocabBank: React.FC<FabVocabBankProps> = ({
             })}
           </div>
 
-          <div className="flex items-center gap-2.5 shrink-0">
-            {/* View Density Toggle - Clean Segmented Control */}
-            <div className="hidden sm:flex items-center bg-slate-950 border border-slate-800 rounded-xl p-0.5 text-[11px] font-mono">
-              <button
-                onClick={() => {
-                  playClickSound();
-                  setViewDensity('compact');
-                }}
-                className={`px-2.5 py-1 rounded-lg cursor-pointer transition-all font-bold whitespace-nowrap ${
-                  viewDensity === 'compact'
-                    ? 'bg-cyan-500/20 text-cyan-300 shadow-xs'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-                title="三欄精簡網格"
-              >
-                3 欄網格
-              </button>
-              <button
-                onClick={() => {
-                  playClickSound();
-                  setViewDensity('normal');
-                }}
-                className={`px-2.5 py-1 rounded-lg cursor-pointer transition-all font-bold whitespace-nowrap ${
-                  viewDensity === 'normal'
-                    ? 'bg-cyan-500/20 text-cyan-300 shadow-xs'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-                title="兩欄寬版舒適精讀"
-              >
-                2 欄精讀
-              </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center bg-slate-950 border border-slate-800 rounded-xl p-0.5 text-[11px] font-mono tabular-nums">
+              {[
+                { id: 'all', label: '全' },
+                { id: 'pending', label: '待背' },
+                { id: 'mastered', label: `熟記 ${masteredIds.filter((id) => allVocabList.some((v) => v.id === id)).length}` },
+              ].map((mf) => (
+                <button
+                  key={mf.id}
+                  type="button"
+                  onClick={() => {
+                    playClickSound();
+                    setMasteryFilter(mf.id as 'all' | 'pending' | 'mastered');
+                  }}
+                  className={`px-2 py-1 rounded-lg cursor-pointer transition-colors font-bold whitespace-nowrap ${
+                    masteryFilter === mf.id
+                      ? 'bg-emerald-400 text-slate-950 font-black'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  {mf.label}
+                </button>
+              ))}
             </div>
-
             <span className="text-[11px] text-slate-400 font-mono tabular-nums hidden md:inline shrink-0">
-              共 <strong className="text-cyan-300 font-black">{filteredVocab.length}</strong> / {allVocabList.length} 詞
+              共 <strong className="text-cyan-300 font-black">{filteredVocab.length}</strong> 詞
             </span>
           </div>
         </div>
@@ -520,7 +701,6 @@ export const FabVocabBank: React.FC<FabVocabBankProps> = ({
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.95 }}
                 transition={{ duration: 0.18, delay: Math.min(idx * 0.015, 0.25) }}
-                whileHover={{ y: -2, transition: { duration: 0.12 } }}
                 key={item.id}
                 onClick={() => {
                   playClickSound();
@@ -574,57 +754,107 @@ export const FabVocabBank: React.FC<FabVocabBankProps> = ({
                       </div>
                     </div>
 
-                    {/* Quick Action Audio & Note Buttons */}
-                    <div className="flex items-center gap-1 shrink-0">
+                    {/* Quick Action Header Buttons (Max 3: 熟記 + 發音 + 更多 ▾) */}
+                    <div className="flex items-center gap-1 shrink-0 relative" onClick={(e) => e.stopPropagation()}>
                       <button
-                        onClick={(e) => handleCopyWord(item, e)}
+                        type="button"
+                        aria-pressed={masteredIds.includes(item.id)}
+                        onClick={(e) => handleToggleMastered(item.id, e)}
                         className={`p-1.5 rounded-lg border transition-all cursor-pointer shadow-xs active:scale-95 ${
-                          isCopied
-                            ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-                            : 'bg-slate-800/80 text-slate-400 hover:text-white border-slate-700/80 hover:bg-slate-700'
+                          masteredIds.includes(item.id)
+                            ? 'bg-emerald-400/20 text-emerald-300 border-emerald-400/60'
+                            : 'bg-slate-800/80 text-slate-400 hover:text-emerald-300 border-slate-700/80 hover:bg-slate-700'
                         }`}
-                        title="複製單字與釋義"
+                        title={masteredIds.includes(item.id) ? '已熟記（點擊取消標記）' : '標記為已熟記'}
                       >
-                        {isCopied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                        <CheckCircle2 className="w-3.5 h-3.5" />
                       </button>
 
                       <button
-                        onClick={(e) => {
-                          e.stopPropagation();
+                        type="button"
+                        onClick={() => {
                           playClickSound();
-                          setActiveNoteVocab(item);
-                          setIsNoteModalOpen(true);
-                        }}
-                        className={`p-1.5 rounded-lg border transition-all cursor-pointer shadow-xs active:scale-95 ${
-                          hasUserNote
-                            ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                            : 'bg-slate-800/80 text-slate-400 hover:text-white border-slate-700/80 hover:bg-slate-700'
-                        }`}
-                        title="開啟單字個人備忘筆記"
-                      >
-                        <StickyNote className="w-3.5 h-3.5" />
-                      </button>
-
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          playClickSound();
+                          stopPhonicsSequence();
                           speakEnglish(item.word, speechSpeed);
                         }}
                         className="p-1.5 rounded-lg bg-slate-800/90 text-cyan-300 hover:bg-cyan-400 hover:text-slate-950 border border-slate-700/80 transition-all cursor-pointer shadow-xs active:scale-95"
-                        title="點擊聽英文標準發音"
+                        title="聽英文發音"
                       >
                         <Volume2 className="w-3.5 h-3.5" />
                       </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          playClickSound();
+                          stopPhonicsSequence();
+                          speakEnglish(item.word, 0.7);
+                        }}
+                        className="px-1.5 py-1 rounded-lg bg-slate-800/90 text-amber-300 hover:bg-slate-700 border border-amber-500/30 text-[10px] font-mono font-bold transition-colors cursor-pointer tabular-nums"
+                        title="0.7x 慢速發音"
+                      >
+                        0.7x
+                      </button>
+
+                      <button
+                        type="button"
+                        data-vocab-more-menu
+                        aria-expanded={openMoreCardId === item.id}
+                        aria-haspopup="menu"
+                        onClick={() => {
+                          playClickSound();
+                          setOpenMoreCardId((prev) => (prev === item.id ? null : item.id));
+                        }}
+                        className={`p-1.5 rounded-lg border transition-all cursor-pointer shadow-xs ${
+                          hasUserNote || openMoreCardId === item.id
+                            ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                            : 'bg-slate-800/80 text-slate-400 hover:text-white border-slate-700/80 hover:bg-slate-700'
+                        }`}
+                        title="筆記與複製"
+                      >
+                        <SlidersHorizontal className="w-3.5 h-3.5" />
+                      </button>
+
+                      {openMoreCardId === item.id && (
+                        <div
+                          data-vocab-more-menu
+                          role="menu"
+                          className="absolute right-0 top-9 z-20 w-28 bg-slate-950 border border-slate-700 rounded-xl shadow-xl p-1 space-y-1 text-xs"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => {
+                              playClickSound();
+                              setActiveNoteVocab(item);
+                              setIsNoteModalOpen(true);
+                              setOpenMoreCardId(null);
+                            }}
+                            className="w-full px-2 py-1.5 rounded-lg hover:bg-slate-800 text-amber-300 flex items-center gap-1.5 cursor-pointer font-bold"
+                          >
+                            <StickyNote className="w-3.5 h-3.5" />
+                            <span>備忘筆記</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              handleCopyWord(item, e);
+                              setOpenMoreCardId(null);
+                            }}
+                            className="w-full px-2 py-1.5 rounded-lg hover:bg-slate-800 text-slate-200 flex items-center gap-1.5 cursor-pointer font-bold"
+                          >
+                            {isCopied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                            <span>{isCopied ? '已複製' : '複製詞卡'}</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
 
-                  {/* 整合式單音點讀與音標發音模組 (避免重複堆疊 KK 音標框) */}
+                  {/* 整合式音標與可折合單音積木模組 */}
                   <div
                     onClick={(e) => e.stopPropagation()}
                     className="bg-slate-950/90 rounded-xl border border-slate-800/90 p-2.5 space-y-2 shadow-inner"
                   >
-                    {/* 整詞 KK + 注音 + 諧音 對齊列 */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-xs">
                       <div className="flex items-center gap-1.5 min-w-0 bg-slate-900/80 px-2 py-1 rounded-lg border border-slate-800/80">
                         <span className="text-[10px] font-mono font-bold text-indigo-300 shrink-0">注音</span>
@@ -640,69 +870,125 @@ export const FabVocabBank: React.FC<FabVocabBankProps> = ({
                       </div>
                     </div>
 
-                    {/* 若有單音拆解積木，提供一鍵逐音拆讀與可點擊音節積木 */}
-                    {item.singleSounds && item.singleSounds.length > 0 && (
-                      <div className="pt-1.5 border-t border-slate-800/80 space-y-1.5">
-                        <div className="flex items-center justify-between text-[10px] font-mono text-slate-400">
-                          <span>單音積木拆解（點擊單音慢讀）</span>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              playClickSound();
-                              const sounds = item.singleSounds || [];
-                              let sIdx = 0;
-                              const stepNext = () => {
-                                if (sIdx < sounds.length) {
-                                  const cur = sounds[sIdx];
-                                  sIdx += 1;
-                                  speakSingleEnglishWord(cur.sound, 0.6, () => {
-                                    setTimeout(stepNext, 200);
-                                  });
-                                } else {
-                                  speakEnglish(item.word, 0.78, () => {
-                                    setTimeout(() => speakChinese(cleanTranslation, 1.05), 200);
-                                  });
+                    {/* 可折合單音積木拆解（支援安全取消連讀） */}
+                    {item.singleSounds && item.singleSounds.length > 0 && (() => {
+                      const isPhonicsOpen = Boolean(expandedPhonicsIds[item.id]);
+                      const isPlayingThisPhonics = activePhonicsWordId === item.id;
+                      return (
+                        <div className="pt-1.5 border-t border-slate-800/80 space-y-1.5">
+                          <div className="flex items-center justify-between gap-2 text-[10px] font-mono">
+                            <button
+                              type="button"
+                              aria-expanded={isPhonicsOpen}
+                              onClick={() => {
+                                playClickSound();
+                                setExpandedPhonicsIds((prev) => ({ ...prev, [item.id]: !prev[item.id] }));
+                              }}
+                              className="text-slate-300 hover:text-cyan-300 flex items-center gap-1 cursor-pointer font-bold tabular-nums rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+                            >
+                              <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isPhonicsOpen ? 'rotate-180' : ''}`} />
+                              <span>單音積木（{item.singleSounds.length} 音）</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              aria-pressed={isPlayingThisPhonics}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                playClickSound();
+                                if (isPlayingThisPhonics) {
+                                  stopPhonicsSequence();
+                                  cancelSpeech();
+                                  return;
                                 }
-                              };
-                              stepNext();
-                            }}
-                            className="px-2 py-0.5 rounded bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 font-bold cursor-pointer transition-all whitespace-nowrap"
-                            title="依序慢讀每個單音 ➔ 整字發音 ➔ 中文意思"
-                          >
-                            ▶ 逐音拆讀
-                          </button>
+                                stopPhonicsSequence();
+                                cancelSpeech();
+                                const sessionId = ++phonicsSessionRef.current;
+                                setActivePhonicsWordId(item.id);
+                                const sounds = item.singleSounds || [];
+                                let sIdx = 0;
+                                const stepNext = () => {
+                                  if (phonicsSessionRef.current !== sessionId) return;
+                                  if (sIdx < sounds.length) {
+                                    const cur = sounds[sIdx];
+                                    sIdx += 1;
+                                    speakSingleEnglishWord(cur.sound, 0.6, () => {
+                                      if (phonicsSessionRef.current !== sessionId) return;
+                                      phonicsTimerRef.current = window.setTimeout(() => {
+                                        phonicsTimerRef.current = null;
+                                        stepNext();
+                                      }, 220);
+                                    });
+                                  } else {
+                                    speakEnglish(item.word, 0.78, () => {
+                                      if (phonicsSessionRef.current !== sessionId) return;
+                                      phonicsTimerRef.current = window.setTimeout(() => {
+                                        phonicsTimerRef.current = null;
+                                        if (phonicsSessionRef.current !== sessionId) return;
+                                        speakChinese(cleanTranslation, 1.05, () => {
+                                          if (phonicsSessionRef.current === sessionId) {
+                                            setActivePhonicsWordId(null);
+                                          }
+                                        });
+                                      }, 220);
+                                    });
+                                  }
+                                };
+                                stepNext();
+                              }}
+                              className={`px-2 py-0.5 rounded border font-bold cursor-pointer transition-all whitespace-nowrap flex items-center gap-1 ${
+                                isPlayingThisPhonics
+                                  ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                                  : 'bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border-emerald-500/30'
+                              }`}
+                            >
+                              {isPlayingThisPhonics ? (
+                                <>
+                                  <Square className="w-2.5 h-2.5 fill-current" />
+                                  <span>停止</span>
+                                </>
+                              ) : (
+                                <span>▶ 逐音拆讀</span>
+                              )}
+                            </button>
+                          </div>
+
+                          {isPhonicsOpen && (
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 pt-0.5">
+                              {item.singleSounds.map((syl, sIdx) => {
+                                const sylKK = syl.kk || getWordKKPhonetic(syl.sound);
+                                return (
+                                  <button
+                                    key={`${item.id}-s-${sIdx}`}
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      playClickSound();
+                                      stopPhonicsSequence();
+                                      speakSingleEnglishWord(syl.sound, 0.62);
+                                    }}
+                                    className="px-2 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-cyan-400/60 text-left cursor-pointer transition-all flex flex-col justify-between gap-0.5"
+                                  >
+                                    <div className="flex items-baseline justify-between gap-1 w-full">
+                                      <span className="text-xs font-black font-mono text-cyan-300">{syl.sound}</span>
+                                      {sylKK && <span className="text-[10px] font-mono text-cyan-400/80">{sylKK}</span>}
+                                    </div>
+                                    <div className="flex items-center justify-between gap-1 text-[10px] w-full">
+                                      <span className="font-mono text-amber-300 truncate">{syl.zhuyin}</span>
+                                      <span className="font-sans text-emerald-300 font-bold shrink-0">{syl.homophone}</span>
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
                         </div>
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-                          {item.singleSounds.map((syl, sIdx) => {
-                            const sylKK = syl.kk || getWordKKPhonetic(syl.sound);
-                            return (
-                              <button
-                                key={`${item.id}-s-${sIdx}`}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  playClickSound();
-                                  speakSingleEnglishWord(syl.sound, 0.62);
-                                }}
-                                className="px-2 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-cyan-400/60 text-left cursor-pointer transition-all flex flex-col justify-between gap-0.5"
-                              >
-                                <div className="flex items-baseline justify-between gap-1 w-full">
-                                  <span className="text-xs font-black font-mono text-cyan-300">{syl.sound}</span>
-                                  {sylKK && <span className="text-[10px] font-mono text-cyan-400/80">{sylKK}</span>}
-                                </div>
-                                <div className="flex items-center justify-between gap-1 text-[10px] w-full">
-                                  <span className="font-mono text-amber-300 truncate">{syl.zhuyin}</span>
-                                  <span className="font-sans text-emerald-300 font-bold shrink-0">{syl.homophone}</span>
-                                </div>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
+                      );
+                    })()}
                   </div>
 
-                  {/* 極簡實戰例句區 (3~4 字短句 + 即時聽讀與展開拆解) */}
-                  <div className="bg-slate-950/85 border border-slate-800/80 rounded-xl p-2.5 space-y-1.5">
+                  {/* 極簡實戰例句區（Max 2 Buttons: 例句 + 拆解 ▾） */}
+                  <div className="bg-slate-950/85 border border-slate-800/80 rounded-xl p-2.5 space-y-1.5" onClick={(e) => e.stopPropagation()}>
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <div className="flex items-baseline gap-2 min-w-0 flex-1 flex-wrap">
                         <span className="text-xs sm:text-sm font-black text-white font-mono leading-snug">
@@ -715,47 +1001,47 @@ export const FabVocabBank: React.FC<FabVocabBankProps> = ({
 
                       <div className="flex items-center gap-1 shrink-0">
                         <button
-                          onClick={(e) => {
-                            e.stopPropagation();
+                          type="button"
+                          onClick={() => {
                             playClickSound();
-                            setExpandedSentenceId(expandedSentenceId === item.id ? null : item.id);
-                          }}
-                          className={`px-1.5 py-0.5 rounded-md border text-[10px] font-mono font-bold cursor-pointer transition-all active:scale-95 whitespace-nowrap ${
-                            expandedSentenceId === item.id
-                              ? 'bg-cyan-500 text-slate-950 border-cyan-300'
-                              : 'bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 border-cyan-400/30'
-                          }`}
-                          title="展開例句逐字中文、注音與諧音拆解"
-                        >
-                          {expandedSentenceId === item.id ? '收合' : '拆解'}
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            playClickSound();
-                            speakEnglish(item.exampleSentence, 0.68);
-                          }}
-                          className="px-1.5 py-0.5 rounded-md bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-400/30 text-[10px] font-mono font-bold cursor-pointer transition-all active:scale-95 whitespace-nowrap"
-                          title="0.68x 慢速清晰朗讀例句"
-                        >
-                          慢讀
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            playClickSound();
+                            stopPhonicsSequence();
                             speakEnglish(item.exampleSentence, speechSpeed);
                           }}
-                          className="px-1.5 py-0.5 rounded-md bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 border border-cyan-400/30 text-[10px] font-mono font-bold flex items-center gap-1 cursor-pointer transition-all active:scale-95 whitespace-nowrap"
-                          title="播放例句英文發音"
+                          className="px-2 py-0.5 rounded-md bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 border border-cyan-400/30 text-[10px] font-mono font-bold flex items-center gap-1 cursor-pointer transition-all whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
                         >
                           <Volume2 className="w-3 h-3 text-cyan-400" />
                           <span>例句</span>
                         </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            playClickSound();
+                            stopPhonicsSequence();
+                            speakEnglish(item.exampleSentence, 0.7);
+                          }}
+                          className="px-1.5 py-0.5 rounded-md bg-slate-900 hover:bg-slate-800 text-amber-300 border border-amber-500/30 text-[10px] font-mono font-bold cursor-pointer transition-all whitespace-nowrap tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+                          title="0.7x 慢讀例句"
+                        >
+                          0.7x
+                        </button>
+                        <button
+                          type="button"
+                          aria-expanded={expandedSentenceId === item.id}
+                          onClick={() => {
+                            playClickSound();
+                            setExpandedSentenceId(expandedSentenceId === item.id ? null : item.id);
+                          }}
+                          className={`px-2 py-0.5 rounded-md border text-[10px] font-mono font-bold cursor-pointer transition-all whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
+                            expandedSentenceId === item.id
+                              ? 'bg-cyan-500 text-slate-950 border-cyan-300'
+                              : 'bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 border-cyan-400/30'
+                          }`}
+                        >
+                          拆解 {expandedSentenceId === item.id ? '▴' : '▾'}
+                        </button>
                       </div>
                     </div>
 
-                    {/* 例句單行諧音與注音直讀 */}
                     {(() => {
                       const exMandarinRaw = getMandarinPhoneticFromSentence(item.exampleSentence);
                       const exMandarinClean = exMandarinRaw.trim().replace(/^【\s*|\s*】$/g, '').trim();
@@ -779,12 +1065,21 @@ export const FabVocabBank: React.FC<FabVocabBankProps> = ({
                     })()}
 
                     {expandedSentenceId === item.id && (
-                      <div className="pt-1.5" onClick={(e) => e.stopPropagation()}>
+                      <div className="pt-1.5 space-y-1.5">
                         <InteractiveSentenceViewer
                           sentence={item.exampleSentence}
                           chinese={exTranslation}
                           speechSpeed={speechSpeed}
                         />
+                        <div className="flex justify-end">
+                          <button
+                            type="button"
+                            onClick={() => speakEnglish(item.exampleSentence, 0.7)}
+                            className="px-2 py-0.5 rounded bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-400/30 text-[10px] font-mono font-bold cursor-pointer tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+                          >
+                            0.7x 慢讀
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -852,11 +1147,24 @@ export const FabVocabBank: React.FC<FabVocabBankProps> = ({
       {/* FLASH CHALLENGE MODAL */}
       <AnimatePresence>
         {isChallengeActive && (
-          <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-5">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="無塵室單字快閃競速挑戰"
+            onClick={() => {
+              if (challengeTimerRef.current !== null) {
+                window.clearTimeout(challengeTimerRef.current);
+                challengeTimerRef.current = null;
+              }
+              setIsChallengeActive(false);
+            }}
+            className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-5"
+          >
             <motion.div
               initial={{ opacity: 0, scale: 0.9, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              onClick={(e) => e.stopPropagation()}
               className="bg-slate-900 border border-amber-500/50 rounded-3xl max-w-2xl w-full p-4 sm:p-6 space-y-5 shadow-2xl relative overflow-hidden litho-scanner-overlay litho-laser-line max-h-[92vh] overflow-y-auto"
             >
               {/* Challenge Header Bar */}
@@ -869,8 +1177,8 @@ export const FabVocabBank: React.FC<FabVocabBankProps> = ({
                     <h3 className="text-base sm:text-lg font-black text-slate-100">
                       無塵室單字快閃競速挑戰
                     </h3>
-                    <p className="text-xs text-slate-400 font-mono">
-                      題數 {currentQuestionIdx + 1} / {challengeQuestions.length}
+                    <p className="text-xs text-slate-400 font-mono tabular-nums">
+                      題數 {currentQuestionIdx + 1} / {challengeQuestions.length} · 快捷鍵 1-4 作答
                     </p>
                   </div>
                 </div>
@@ -878,15 +1186,23 @@ export const FabVocabBank: React.FC<FabVocabBankProps> = ({
                 <div className="flex items-center gap-2">
                   {/* Streak Combo Badge */}
                   {combo > 1 && (
-                    <span className="px-2.5 py-1 rounded-full bg-rose-500/20 border border-rose-500/50 text-rose-300 font-mono font-black text-xs animate-bounce">
+                    <span className="px-2.5 py-1 rounded-lg bg-rose-500/20 border border-rose-500/50 text-rose-300 font-mono font-black text-xs tabular-nums">
                       🔥 {combo} 連勝
                     </span>
                   )}
 
                   {/* Close Quiz */}
                   <button
-                    onClick={() => setIsChallengeActive(false)}
-                    className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-all cursor-pointer"
+                    type="button"
+                    aria-label="關閉快閃測驗"
+                    onClick={() => {
+                      if (challengeTimerRef.current !== null) {
+                        window.clearTimeout(challengeTimerRef.current);
+                        challengeTimerRef.current = null;
+                      }
+                      setIsChallengeActive(false);
+                    }}
+                    className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
                   >
                     <X className="w-5 h-5" />
                   </button>
@@ -899,9 +1215,9 @@ export const FabVocabBank: React.FC<FabVocabBankProps> = ({
                   <div className="space-y-5">
                     {/* Timer & Progress Bar */}
                     <div className="space-y-1.5">
-                      <div className="flex items-center justify-between text-xs font-mono">
+                      <div className="flex items-center justify-between text-xs font-mono tabular-nums">
                         <span className="text-slate-400 flex items-center gap-1 font-bold">
-                          <Timer className={`w-3.5 h-3.5 ${timeLeft <= 3 ? 'text-rose-400 animate-spin' : 'text-cyan-400'}`} />
+                          <Timer className={`w-3.5 h-3.5 ${timeLeft <= 3 ? 'text-rose-400' : 'text-cyan-400'}`} />
                           限時倒數:
                           <strong className={`ml-1 text-sm ${timeLeft <= 3 ? 'text-rose-400 font-extrabold' : 'text-cyan-300'}`}>
                             {timeLeft} 秒
@@ -925,7 +1241,7 @@ export const FabVocabBank: React.FC<FabVocabBankProps> = ({
 
                     {/* Question Card */}
                     <div className="bg-slate-950 border border-slate-800 rounded-2xl p-5 space-y-3 text-center relative overflow-hidden shadow-inner">
-                      <span className="inline-block px-3 py-1 rounded-full bg-cyan-950 border border-cyan-800 text-cyan-300 text-[11px] font-extrabold">
+                      <span className="inline-block px-3 py-1 rounded-lg bg-cyan-950 border border-cyan-800 text-cyan-300 text-[11px] font-extrabold">
                         {challengeQuestions[currentQuestionIdx].subPrompt}
                       </span>
 
@@ -935,13 +1251,24 @@ export const FabVocabBank: React.FC<FabVocabBankProps> = ({
                         </h4>
                       </div>
 
-                      <button
-                        onClick={() => speakEnglish(challengeQuestions[currentQuestionIdx].vocabItem.word, speechSpeed)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-cyan-300 hover:text-white text-xs font-bold transition-all cursor-pointer"
-                      >
-                        <Volume2 className="w-3.5 h-3.5" />
-                        <span>播放單字發音</span>
-                      </button>
+                      <div className="flex items-center justify-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => speakEnglish(challengeQuestions[currentQuestionIdx].vocabItem.word, speechSpeed)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-cyan-300 hover:text-white text-xs font-bold transition-all cursor-pointer"
+                        >
+                          <Volume2 className="w-3.5 h-3.5" />
+                          <span>播放發音 (P)</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => speakEnglish(challengeQuestions[currentQuestionIdx].vocabItem.word, 0.7)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-900 border border-amber-500/40 text-amber-300 hover:text-white text-xs font-mono font-bold transition-all cursor-pointer tabular-nums"
+                          title="0.7x 慢速發音 (S)"
+                        >
+                          <span>0.7x (S)</span>
+                        </button>
+                      </div>
                     </div>
 
                     {/* Multiple Choice Options */}
@@ -982,8 +1309,8 @@ export const FabVocabBank: React.FC<FabVocabBankProps> = ({
                 /* QUIZ RESULT SCREEN */
                 <div className="space-y-5 text-center py-2">
                   <div className="space-y-2">
-                    <div className="w-16 h-16 rounded-full bg-amber-400/20 border border-amber-400/50 text-amber-300 flex items-center justify-center mx-auto shadow-xl">
-                      <Trophy className="w-8 h-8 text-amber-400 animate-bounce" />
+                    <div className="w-16 h-16 rounded-2xl bg-amber-400/20 border border-amber-400/50 text-amber-300 flex items-center justify-center mx-auto shadow-xl">
+                      <Trophy className="w-8 h-8 text-amber-400" />
                     </div>
                     <h3 className="text-xl font-black text-slate-100">
                       快閃挑戰測試完成！
@@ -996,11 +1323,11 @@ export const FabVocabBank: React.FC<FabVocabBankProps> = ({
                   {/* Score & Rank Display */}
                   <div className="bg-slate-950 border border-slate-800 rounded-2xl p-5 space-y-2 max-w-md mx-auto shadow-inner">
                     <span className="text-xs font-bold text-slate-400">測驗總分</span>
-                    <div className="text-4xl font-black font-mono text-amber-300">
+                    <div className="text-4xl font-black font-mono text-amber-300 tabular-nums">
                       {Math.min(100, Math.round((userAnswers.filter((a) => a.isCorrect).length / challengeQuestions.length) * 100))} <span className="text-sm text-slate-400 font-normal">分</span>
                     </div>
 
-                    <div className="pt-2 border-t border-slate-800 flex items-center justify-around text-xs font-mono">
+                    <div className="pt-2 border-t border-slate-800 flex items-center justify-around text-xs font-mono tabular-nums">
                       <div>
                         <span className="text-slate-500 block">答對題數</span>
                         <span className="text-emerald-400 font-extrabold">

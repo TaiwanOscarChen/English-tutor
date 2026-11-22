@@ -70,7 +70,7 @@ export const DailyGoalNotification: React.FC<DailyGoalNotificationProps> = ({
             {completedToday ? (
               <CheckCircle2 className="w-5 h-5 text-emerald-400" />
             ) : (
-              <Flame className="w-5 h-5 animate-bounce text-indigo-950" />
+              <Flame className="w-5 h-5 text-indigo-950" />
             )}
           </div>
 
@@ -83,7 +83,7 @@ export const DailyGoalNotification: React.FC<DailyGoalNotificationProps> = ({
               }`}>
                 {completedToday ? '🎯 已完成今日目標' : '🔥 今日未打卡'}
               </span>
-              <span className="text-xs font-mono font-bold text-amber-300">
+              <span className="text-xs font-mono font-bold text-amber-300 tabular-nums">
                 連勝打卡：{streakCount} 天
               </span>
             </div>
@@ -101,7 +101,7 @@ export const DailyGoalNotification: React.FC<DailyGoalNotificationProps> = ({
           {!completedToday ? (
             <button
               onClick={handleCompleteGoal}
-              className="px-6 py-3 rounded-2xl bg-yellow-400 hover:bg-yellow-300 text-indigo-950 font-black text-sm flex items-center gap-2 shadow-xl hover:shadow-yellow-400/30 transition-all hover:scale-105 active:scale-95 cursor-pointer"
+              className="px-6 py-3 rounded-2xl bg-yellow-400 hover:bg-yellow-300 text-indigo-950 font-black text-sm flex items-center gap-2 shadow-xl hover:shadow-yellow-400/30 transition-colors active:scale-95 cursor-pointer"
             >
               <Sparkles className="w-4 h-4 text-indigo-900" />
               <span>一鍵聽讀打卡完成</span>

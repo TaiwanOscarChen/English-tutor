@@ -30,7 +30,7 @@ export const FseLogo: React.FC<FseLogoProps> = ({
     >
       <svg
         viewBox="0 0 120 120"
-        className="w-full h-full drop-shadow-md group-hover:scale-105 group-hover:rotate-1 transition-all duration-300 ease-out"
+        className="w-full h-full drop-shadow-md transition-opacity duration-200 ease-out"
         fill="none"
         xmlns="http://www.w3.org/2000/svg"
       >

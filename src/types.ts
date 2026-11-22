@@ -25,6 +25,7 @@ export interface Lesson {
   memory_trick: string;
   additional_context?: string;
   category?: string;
+  isImported?: boolean;
   favorite?: boolean;
   practiceQuestions?: LessonQuizQuestion[];
 }

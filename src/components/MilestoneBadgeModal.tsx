@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { MilestoneBadge } from '../types';
 import { Award, Sparkles, CheckCircle2, ShieldCheck, Zap, Download, X, Flame } from 'lucide-react';
@@ -14,6 +14,18 @@ export const MilestoneBadgeModal: React.FC<MilestoneBadgeModalProps> = ({
   isOpen,
   onClose
 }) => {
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [isOpen, onClose]);
+
   if (!isOpen || !badge) return null;
 
   const handleExportBadgeCard = () => {
@@ -43,8 +55,15 @@ export const MilestoneBadgeModal: React.FC<MilestoneBadgeModalProps> = ({
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={`成就里程碑：${badge.title}`}
+        onClick={onClose}
+        className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md"
+      >
         <motion.div
+          onClick={(e) => e.stopPropagation()}
           initial={{ scale: 0.85, opacity: 0, y: 20 }}
           animate={{ scale: 1, opacity: 1, y: 0 }}
           exit={{ scale: 0.85, opacity: 0, y: 20 }}
@@ -56,16 +75,19 @@ export const MilestoneBadgeModal: React.FC<MilestoneBadgeModalProps> = ({
 
           {/* Close button */}
           <button
+            type="button"
+            aria-label="關閉成就徽章"
             onClick={onClose}
-            className="absolute top-4 right-4 p-2 rounded-full bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 transition-colors cursor-pointer"
+            className="absolute top-4 right-4 p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+            title="關閉視窗 (Esc)"
           >
             <X className="w-4 h-4" />
           </button>
 
           {/* Header Title */}
           <div className="space-y-1">
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-400/20 border border-amber-400/60 text-amber-300 font-mono text-xs font-black">
-              <Sparkles className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md bg-amber-400/20 border border-amber-400/60 text-amber-300 font-mono text-xs font-black">
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
               <span>晶圓維修成就里程碑解鎖</span>
             </div>
             <h2 className="text-2xl font-black text-slate-100 tracking-tight font-mono pt-1">
@@ -86,7 +108,7 @@ export const MilestoneBadgeModal: React.FC<MilestoneBadgeModalProps> = ({
             />
             <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-amber-400 to-yellow-600 p-0.5 shadow-xl shadow-amber-500/30 flex items-center justify-center relative group">
               <div className="w-full h-full bg-slate-950 rounded-[14px] flex flex-col items-center justify-center p-3 text-amber-400">
-                <Award className="w-12 h-12 stroke-[1.8] text-amber-400 drop-shadow-[0_0_10px_rgba(250,204,21,0.6)] animate-bounce" />
+                <Award className="w-12 h-12 stroke-[1.8] text-amber-400 drop-shadow-[0_0_10px_rgba(250,204,21,0.6)]" />
               </div>
             </div>
           </div>
@@ -117,15 +139,17 @@ export const MilestoneBadgeModal: React.FC<MilestoneBadgeModalProps> = ({
           {/* Actions */}
           <div className="pt-2 flex items-center gap-2">
             <button
+              type="button"
               onClick={handleExportBadgeCard}
-              className="flex-1 py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-200 font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer hover:scale-[1.02] active:scale-95"
+              className="flex-1 py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-200 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
             >
               <Download className="w-3.5 h-3.5 text-amber-400" />
               <span>匯出成就卡 (.txt)</span>
             </button>
             <button
+              type="button"
               onClick={onClose}
-              className="flex-1 py-2.5 px-3 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-lg shadow-amber-500/20 hover:scale-[1.02] active:scale-95"
+              className="flex-1 py-2.5 px-3 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-lg shadow-amber-500/20 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
             >
               <Flame className="w-3.5 h-3.5 fill-slate-950" />
               <span>收下徽章，繼續特訓</span>

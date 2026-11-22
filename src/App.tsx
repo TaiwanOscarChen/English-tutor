@@ -1,47 +1,62 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Lesson, UserDiagnostics, VocabItem } from './types';
-import { PRESET_LESSONS } from './data/presetLessons';
+import {
+  PRESET_LESSONS,
+  PRESET_LESSONS_UPDATED_EVENT,
+  getActivePresetLessons,
+  applyPresetLessonBatchUpdates,
+  type PresetLessonPatch,
+} from './data/presetLessons';
+import { fetchServerPresetLessonOverrides } from './utils/curriculumAuditEngine';
 import { Header } from './components/Header';
 import { LessonCard } from './components/LessonCard';
-import { FabVocabBank } from './components/FabVocabBank';
-import { CleanroomArticlesTab } from './components/CleanroomArticlesTab';
-import { FloatingToolbar } from './components/FloatingToolbar';
-import { InteractiveGuideModal } from './components/InteractiveGuideModal';
-import { QuickCheatSheetModal } from './components/QuickCheatSheetModal';
-import { SpeechPracticeModal } from './components/SpeechPracticeModal';
-import { CleanroomBadgeModal } from './components/CleanroomBadgeModal';
 import { WaferCircuitParticles } from './components/WaferCircuitParticles';
 import { TechSpotlightCard } from './components/TechSpotlightCard';
 import { ShiftScheduler } from './components/ShiftScheduler';
 import { HandoverReminderBanner } from './components/HandoverReminderBanner';
-import { AiErrorCodeGeneratorModal } from './components/AiErrorCodeGeneratorModal';
-import { AiQuickDecomposerModal } from './components/AiQuickDecomposerModal';
-import { VoiceSettingsModal } from './components/VoiceSettingsModal';
+import { getStoredGlobalSpeechSpeed, saveGlobalSpeechSpeed } from './utils/speechSpeedCalibrator';
+import { globalOfflineSpeechPlaylist } from './utils/offlineSpeechPlaylist';
 import { OfflineCachePromptBanner } from './components/OfflineCachePromptBanner';
-import { OfflineCacheModal } from './components/OfflineCacheModal';
 import { OfflinePlaylistPlayerBar } from './components/OfflinePlaylistPlayerBar';
-import { FabEmergencyModal } from './components/FabEmergencyModal';
-import { FabScenarioSimulatorModal } from './components/FabScenarioSimulatorModal';
-import { FabEmergencySection } from './components/FabEmergencySection';
-import { FabScenarioSection } from './components/FabScenarioSection';
-import { GlobalCommandPaletteModal } from './components/GlobalCommandPaletteModal';
-import { VocabMatchGameModal } from './components/VocabMatchGameModal';
 import { ScrollToTopButton } from './components/ScrollToTopButton';
 import { TypographyOptimizer } from './components/TypographyOptimizer';
 import { MobileBottomNav } from './components/MobileBottomNav';
 import { OfflineSyncPromptBar } from './components/OfflineSyncPromptBar';
-import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
-import { SystemDataBackupModal } from './components/SystemDataBackupModal';
-import { SystemHealthModal } from './components/SystemHealthModal';
-import { CleanroomSpeechShadowing } from './components/CleanroomSpeechShadowing';
-import { FabVendorEquipmentHub } from './components/FabVendorEquipmentHub';
-import { BookmarksTab } from './components/BookmarksTab';
-import { DriveModeTab } from './components/DriveModeTab';
-import { DiagnosticsAndRemediation } from './components/DiagnosticsAndRemediation';
-import { AchievementTree } from './components/AchievementTree';
-import { AiLessonGenerator } from './components/AiLessonGenerator';
-import { CustomMediaImportModal } from './components/CustomMediaImportModal';
+
+// Code-split secondary tabs (loaded on demand to keep first-paint bundle lean)
+const FabVocabBank = lazy(() => import('./components/FabVocabBank').then((m) => ({ default: m.FabVocabBank })));
+const CleanroomArticlesTab = lazy(() => import('./components/CleanroomArticlesTab').then((m) => ({ default: m.CleanroomArticlesTab })));
+const FabEmergencySection = lazy(() => import('./components/FabEmergencySection').then((m) => ({ default: m.FabEmergencySection })));
+const FabScenarioSection = lazy(() => import('./components/FabScenarioSection').then((m) => ({ default: m.FabScenarioSection })));
+const CleanroomSpeechShadowing = lazy(() => import('./components/CleanroomSpeechShadowing').then((m) => ({ default: m.CleanroomSpeechShadowing })));
+const FabVendorEquipmentHub = lazy(() => import('./components/FabVendorEquipmentHub').then((m) => ({ default: m.FabVendorEquipmentHub })));
+const BookmarksTab = lazy(() => import('./components/BookmarksTab').then((m) => ({ default: m.BookmarksTab })));
+const DriveModeTab = lazy(() => import('./components/DriveModeTab').then((m) => ({ default: m.DriveModeTab })));
+const DiagnosticsAndRemediation = lazy(() => import('./components/DiagnosticsAndRemediation').then((m) => ({ default: m.DiagnosticsAndRemediation })));
+const AchievementTree = lazy(() => import('./components/AchievementTree').then((m) => ({ default: m.AchievementTree })));
+const AiLessonGenerator = lazy(() => import('./components/AiLessonGenerator').then((m) => ({ default: m.AiLessonGenerator })));
+const AiTutorChat = lazy(() => import('./components/AiTutorChat').then((m) => ({ default: m.AiTutorChat })));
+
+// Code-split modals (mounted and loaded only when opened)
+const InteractiveGuideModal = lazy(() => import('./components/InteractiveGuideModal').then((m) => ({ default: m.InteractiveGuideModal })));
+const QuickCheatSheetModal = lazy(() => import('./components/QuickCheatSheetModal').then((m) => ({ default: m.QuickCheatSheetModal })));
+const SpeechPracticeModal = lazy(() => import('./components/SpeechPracticeModal').then((m) => ({ default: m.SpeechPracticeModal })));
+const CleanroomBadgeModal = lazy(() => import('./components/CleanroomBadgeModal').then((m) => ({ default: m.CleanroomBadgeModal })));
+const AiErrorCodeGeneratorModal = lazy(() => import('./components/AiErrorCodeGeneratorModal').then((m) => ({ default: m.AiErrorCodeGeneratorModal })));
+const AiQuickDecomposerModal = lazy(() => import('./components/AiQuickDecomposerModal').then((m) => ({ default: m.AiQuickDecomposerModal })));
+const VoiceSettingsModal = lazy(() => import('./components/VoiceSettingsModal').then((m) => ({ default: m.VoiceSettingsModal })));
+const OfflineCacheModal = lazy(() => import('./components/OfflineCacheModal').then((m) => ({ default: m.OfflineCacheModal })));
+const FabEmergencyModal = lazy(() => import('./components/FabEmergencyModal').then((m) => ({ default: m.FabEmergencyModal })));
+const FabScenarioSimulatorModal = lazy(() => import('./components/FabScenarioSimulatorModal').then((m) => ({ default: m.FabScenarioSimulatorModal })));
+const GlobalCommandPaletteModal = lazy(() => import('./components/GlobalCommandPaletteModal').then((m) => ({ default: m.GlobalCommandPaletteModal })));
+const VocabMatchGameModal = lazy(() => import('./components/VocabMatchGameModal').then((m) => ({ default: m.VocabMatchGameModal })));
+const KeyboardShortcutsModal = lazy(() => import('./components/KeyboardShortcutsModal').then((m) => ({ default: m.KeyboardShortcutsModal })));
+const SystemDataBackupModal = lazy(() => import('./components/SystemDataBackupModal').then((m) => ({ default: m.SystemDataBackupModal })));
+const SystemHealthModal = lazy(() => import('./components/SystemHealthModal').then((m) => ({ default: m.SystemHealthModal })));
+const CustomMediaImportModal = lazy(() => import('./components/CustomMediaImportModal').then((m) => ({ default: m.CustomMediaImportModal })));
+const CleanroomScenarioModal = lazy(() => import('./components/CleanroomScenarioModal').then((m) => ({ default: m.CleanroomScenarioModal })));
+const ShiftHandoverTimedDrillModal = lazy(() => import('./components/ShiftHandoverTimedDrillModal').then((m) => ({ default: m.ShiftHandoverTimedDrillModal })));
 import { ToastProvider } from './context/ToastContext';
 import { useThreeDayAutoUpdate } from './hooks/useThreeDayAutoUpdate';
 import { useOfflineStatus } from './hooks/useOfflineStatus';
@@ -51,21 +66,21 @@ import { AOI_HANDWRITTEN_VOCAB, AOI_HANDWRITTEN_LESSONS } from './data/aoiHandwr
 import { getWordKKPhonetic } from './utils/wordDictionary';
 import { auditAndConvertImportedData, sanitizeVocabItemToPublicSafe } from './utils/pipSanitizer';
 import { ShiftSettings, PauseHotspot } from './types';
-import { speakEnglish, speakChinese, cancelSpeech, useSpeechLatencyMonitor } from './utils/speech';
-import { prefetchAdjacentLessons, warmupCommonFabVocabulary } from './utils/speechPrefetcher';
+import { speakEnglish, speakChinese, cancelSpeech, useSpeechLatencyMonitor, globalAudioScheduler } from './utils/speech';
+import { prefetchAdjacentLessons, warmupCommonFabVocabulary, scheduleIdleSafetyAudioPrefetch } from './utils/speechPrefetcher';
 import { playClickSound, playSuccessChime, isSoundEnabled, setSoundEnabled } from './utils/audioEffects';
 import { getStoredFontSize, applyFontSizeToDocument } from './utils/fontSize';
 import { getStoredContrastMode, applyContrastModeToDocument, toggleContrastMode } from './utils/contrastMode';
 import { CleanroomScenarioId, getStoredScenario, applyScenarioToDocument } from './utils/cleanroomScenario';
-import { CleanroomScenarioModal } from './components/CleanroomScenarioModal';
 import { runStorageSelfHealing, runFullSystemDiagnostics } from './utils/systemSelfHeal';
 import { pushLocalProgressToServer, queueAutoServerSync } from './utils/serverSyncService';
 import { useScrollToTop } from './hooks/useScrollToTop';
-import { Sparkles, ArrowRight, Cpu, Layers, BookOpen, FileText, Bookmark, Award, Activity, Play, Pause, Repeat, Filter, CheckCircle2, ShieldAlert, Zap, Clock, Flame, Waves, Timer, ChevronLeft, ChevronRight, Wand2, Gamepad2, Headphones, Upload, FolderOpen } from 'lucide-react';
+import { loadSrsMap, rateLessonMemory, isLessonDueForReview, getDueLessonsCount, SrsCardState, MemoryRating } from './utils/srsScheduler';
+import { Sparkles, ArrowRight, Cpu, Layers, BookOpen, FileText, Bookmark, Award, Activity, Play, Pause, Repeat, Filter, CheckCircle2, ShieldAlert, Zap, Clock, Flame, Waves, Timer, ChevronLeft, ChevronRight, Wand2, Gamepad2, Headphones, Upload, FolderOpen, Bot } from 'lucide-react';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'daily' | 'shadowing' | 'drive' | 'vendors' | 'knowledge'>('daily');
-  const [knowledgeSubTab, setKnowledgeSubTab] = useState<'vocab' | 'articles' | 'emergency' | 'scenario' | 'bookmarks' | 'diagnostics'>('vocab');
+  const [knowledgeSubTab, setKnowledgeSubTab] = useState<'vocab' | 'articles' | 'emergency' | 'scenario' | 'bookmarks' | 'tutor' | 'diagnostics'>('vocab');
   const [showAiGenerator, setShowAiGenerator] = useState<boolean>(false);
 
   const mainContainerRef = useRef<HTMLElement | null>(null);
@@ -105,7 +120,16 @@ export default function App() {
       setKnowledgeSubTab(subTab as any);
     }
   };
-  const [speechSpeed, setSpeechSpeed] = useState<number>(0.85);
+  const [speechSpeed, setSpeechSpeedState] = useState<number>(() => getStoredGlobalSpeechSpeed(0.85));
+  const setSpeechSpeed = (nextSpeed: number) => {
+    const saved = saveGlobalSpeechSpeed(nextSpeed);
+    setSpeechSpeedState(saved);
+    try {
+      localStorage.setItem('fse_speech_speed_updated_at', String(Date.now()));
+      globalOfflineSpeechPlaylist.updateConfig({ speechSpeed: saved });
+      queueAutoServerSync(2000);
+    } catch {}
+  };
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [currentDailyIndex, setCurrentDailyIndex] = useState<number>(0);
   const [bookmarkedLessons, setBookmarkedLessons] = useState<Lesson[]>([]);
@@ -171,9 +195,15 @@ export default function App() {
   const [isSystemHealthModalOpen, setIsSystemHealthModalOpen] = useState<boolean>(false);
   const [isCleanroomAmbienceModalOpen, setIsCleanroomAmbienceModalOpen] = useState<boolean>(false);
   const [isMediaImportModalOpen, setIsMediaImportModalOpen] = useState<boolean>(false);
+  const [isHandoverDrillOpen, setIsHandoverDrillOpen] = useState<boolean>(false);
+  const [customSpeechTarget, setCustomSpeechTarget] = useState<{ sentence: string; phonetic: string } | null>(null);
   const [importedVocab, setImportedVocab] = useState<VocabItem[]>(AOI_HANDWRITTEN_VOCAB);
   const [importedLessons, setImportedLessons] = useState<Lesson[]>(AOI_HANDWRITTEN_LESSONS);
   const [showOnlyImportedLessons, setShowOnlyImportedLessons] = useState<boolean>(false);
+  const [showOnlyDueLessons, setShowOnlyDueLessons] = useState<boolean>(false);
+  const [srsMap, setSrsMap] = useState<Record<string, SrsCardState>>(() => loadSrsMap());
+  const [decomposerInitialSentence, setDecomposerInitialSentence] = useState<string>('');
+  const [showDailyToolbox, setShowDailyToolbox] = useState<boolean>(false);
 
   // Cleanroom Scenario Atmosphere & Contrast State
   const [currentScenario, setCurrentScenario] = useState<CleanroomScenarioId>(() => getStoredScenario());
@@ -205,12 +235,69 @@ export default function App() {
 
   const activeTabRef = useRef(activeTab);
   activeTabRef.current = activeTab;
+  const currentDailyIndexRef = useRef(currentDailyIndex);
+  currentDailyIndexRef.current = currentDailyIndex;
   const displayedLessonsRef = useRef<Lesson[]>([]);
+  const isMountedRef = useRef<boolean>(true);
+  const pulseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const badgeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const aiDrawerRef = useRef<HTMLDivElement | null>(null);
 
-  // Global Keyboard Shortcuts (Cmd+K, ?, 1-5, M, Space, Escape, ArrowLeft/Right)
+  const anyModalOpen =
+    isGuideOpen ||
+    isCheatSheetOpen ||
+    isSpeechModalOpen ||
+    isBadgeModalOpen ||
+    isErrorCodeModalOpen ||
+    isDecomposerModalOpen ||
+    isVoiceSettingsOpen ||
+    isSearchModalOpen ||
+    isEmergencyModalOpen ||
+    isScenarioModalOpen ||
+    isMatchGameModalOpen ||
+    isShortcutsOpen ||
+    isBackupModalOpen ||
+    isSystemHealthModalOpen ||
+    isCleanroomAmbienceModalOpen ||
+    isMediaImportModalOpen ||
+    isHandoverDrillOpen ||
+    offlineStatus.isFlashcardsModalOpen;
+
+  const anyModalOpenRef = useRef(anyModalOpen);
+  anyModalOpenRef.current = anyModalOpen;
+
+  // Polite idle low-bandwidth safety audio prefetch (skips saveData / slow networks, capped to 6 new clips)
+  useEffect(() => {
+    const safetyAudioItems = FAB_VOCAB.filter((v) => v.category === 'safety')
+      .flatMap((v) => [
+        ...(v.word ? [{ text: v.word, lang: 'en-US' as const }] : []),
+        ...(v.exampleSentence ? [{ text: v.exampleSentence, lang: 'en-US' as const }] : [])
+      ]);
+    return scheduleIdleSafetyAudioPrefetch(safetyAudioItems, speechSpeed, 6);
+  }, []);
+
+  // Pause Auto-Pilot cruise automatically if user opens any modal overlay
+  useEffect(() => {
+    if (anyModalOpen && isAutoPilot) {
+      setIsAutoPilot(false);
+      cancelSpeech();
+    }
+  }, [anyModalOpen, isAutoPilot]);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      if (pulseTimerRef.current) clearTimeout(pulseTimerRef.current);
+      if (badgeTimerRef.current) clearTimeout(badgeTimerRef.current);
+      if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
+    };
+  }, []);
+
+  // Global Keyboard Shortcuts (Cmd+K, ?, 1-4, M, B, Escape, ArrowLeft/Right)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // 檢查使用者是否正處於輸入框、文字區塊或可編輯元素內
       const target = e.target as HTMLElement | null;
       const isInput =
         target &&
@@ -242,12 +329,14 @@ export default function App() {
         setIsGuideOpen(false);
         setIsBackupModalOpen(false);
         setIsSystemHealthModalOpen(false);
+        setIsCleanroomAmbienceModalOpen(false);
         setIsMediaImportModalOpen(false);
+        offlineStatus.closeOfflineFlashcards();
         return;
       }
 
-      // 若在輸入框內打字，不觸發單鍵導航
-      if (isInput) return;
+      // 若在輸入框內打字或任何彈窗已開啟，不觸發單鍵快捷導航
+      if (isInput || anyModalOpenRef.current || e.metaKey || e.ctrlKey || e.altKey) return;
 
       // 3. ? 鍵: 開啟快捷鍵指引
       if (e.key === '?' || (e.shiftKey && e.key === '/')) {
@@ -267,7 +356,7 @@ export default function App() {
         return;
       }
 
-      // 5. 數字鍵 1-4: 快速切換頂層標籤頁
+      // 5. 數字鍵 1-5: 快速切換頂層標籤頁
       if (e.key === '1') {
         e.preventDefault();
         handleSetActiveTab('daily');
@@ -276,8 +365,11 @@ export default function App() {
         handleSetActiveTab('shadowing');
       } else if (e.key === '3') {
         e.preventDefault();
-        handleSetActiveTab('vendors');
+        handleSetActiveTab('drive');
       } else if (e.key === '4') {
+        e.preventDefault();
+        handleSetActiveTab('vendors');
+      } else if (e.key === '5') {
         e.preventDefault();
         handleSetActiveTab('knowledge');
       }
@@ -296,7 +388,27 @@ export default function App() {
         }
       }
 
-      // 7. B 鍵: 數據備份與系統健全診斷
+      // 7. P 鍵: 快速開啟當前句型口說實測 / R 鍵: 立即重聽當前句型
+      if (e.key.toLowerCase() === 'p') {
+        e.preventDefault();
+        playClickSound();
+        setIsSpeechModalOpen(true);
+        return;
+      }
+      if (e.key.toLowerCase() === 'r') {
+        e.preventDefault();
+        const activeList = displayedLessonsRef.current;
+        if (activeList.length > 0) {
+          const idx = currentDailyIndexRef.current % activeList.length;
+          const targetSentence = activeList[idx]?.english_sentence;
+          if (targetSentence) {
+            speakEnglish(targetSentence, getStoredGlobalSpeechSpeed(0.85));
+          }
+        }
+        return;
+      }
+
+      // 8. B 鍵: 數據備份與系統健全診斷
       if (e.key.toLowerCase() === 'b') {
         e.preventDefault();
         playClickSound();
@@ -453,10 +565,60 @@ export default function App() {
     };
   }, []);
 
+  // 同步記憶曲線 (SM-2) 狀態變更
+  useEffect(() => {
+    const refreshSrs = () => setSrsMap(loadSrsMap());
+    window.addEventListener('fse-srs-updated', refreshSrs);
+    window.addEventListener('storage', refreshSrs);
+    return () => {
+      window.removeEventListener('fse-srs-updated', refreshSrs);
+      window.removeEventListener('storage', refreshSrs);
+    };
+  }, []);
+
+  // 當伺服器雙向合併回傳更新紀錄時，即時同步更新前端 React 狀態（無須手動重整）
+  useEffect(() => {
+    const handleServerSynced = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail;
+      const rec = detail?.record;
+      if (!rec || !isMountedRef.current) return;
+
+      if (Array.isArray(rec.bookmarks)) {
+        setBookmarkedLessons((prev) => (rec.bookmarks.length > prev.length ? rec.bookmarks : prev));
+      }
+      if (Array.isArray(rec.visitedLessonIds)) {
+        setVisitedLessonIds((prev) => (rec.visitedLessonIds.length > prev.length ? rec.visitedLessonIds : prev));
+      }
+      if (Array.isArray(rec.readArticleIds)) {
+        setReadArticleIds((prev) => (rec.readArticleIds.length > prev.length ? rec.readArticleIds : prev));
+      }
+      if (Array.isArray(rec.bookmarkedArticleIds)) {
+        setBookmarkedArticleIds((prev) => (rec.bookmarkedArticleIds.length > prev.length ? rec.bookmarkedArticleIds : prev));
+      }
+      if (typeof rec.streakCount === 'number') {
+        setStreakCount((prev) => (rec.streakCount > prev ? rec.streakCount : prev));
+      }
+      if (rec.diagnostics && typeof rec.diagnostics === 'object') {
+        setDiagnostics((prev) => {
+          const remotePracticed = rec.diagnostics.totalSentencesPracticed || 0;
+          const localPracticed = prev.totalSentencesPracticed || 0;
+          if (remotePracticed > localPracticed) {
+            return { ...prev, ...rec.diagnostics };
+          }
+          return prev;
+        });
+      }
+    };
+
+    window.addEventListener('fse-server-synced', handleServerSynced);
+    return () => window.removeEventListener('fse-server-synced', handleServerSynced);
+  }, []);
+
   const handleUpdateShiftSettings = (nextSettings: ShiftSettings) => {
     setShiftSettings(nextSettings);
     try {
       localStorage.setItem('fse_shift_settings', JSON.stringify(nextSettings));
+      queueAutoServerSync(2500);
     } catch (e) {}
   };
 
@@ -535,9 +697,34 @@ export default function App() {
     });
   }, []);
 
-  // Merge PRESET_LESSONS with importedLessons and 3-Day generated lessons if available
+  // Reactive PRESET_LESSONS synced with confirmed batch updates (local + server overrides)
+  const [activePresetLessons, setActivePresetLessons] = useState<Lesson[]>(() => getActivePresetLessons());
+
+  useEffect(() => {
+    const refreshPresets = () => {
+      setActivePresetLessons(getActivePresetLessons());
+    };
+    window.addEventListener(PRESET_LESSONS_UPDATED_EVENT, refreshPresets);
+    window.addEventListener('storage', refreshPresets);
+
+    fetchServerPresetLessonOverrides().then((serverOverrides) => {
+      if (serverOverrides && Object.keys(serverOverrides).length > 0) {
+        const patches = Object.values(serverOverrides) as PresetLessonPatch[];
+        if (patches.length > 0) {
+          applyPresetLessonBatchUpdates(patches);
+        }
+      }
+    }).catch(() => {});
+
+    return () => {
+      window.removeEventListener(PRESET_LESSONS_UPDATED_EVENT, refreshPresets);
+      window.removeEventListener('storage', refreshPresets);
+    };
+  }, []);
+
+  // Merge activePresetLessons with importedLessons and 3-Day generated lessons if available
   const baseLessons = React.useMemo(() => {
-    let list: Lesson[] = [...PRESET_LESSONS];
+    let list: Lesson[] = [...activePresetLessons];
     if (threeDayBundle?.lessons && threeDayBundle.lessons.length > 0) {
       const bundleLessons: Lesson[] = threeDayBundle.lessons.map((l, i) => ({
         id: l.id || `3d-gen-${i}`,
@@ -556,25 +743,59 @@ export default function App() {
       list = [...importedLessons, ...list];
     }
     return list;
-  }, [threeDayBundle, importedLessons]);
+  }, [activePresetLessons, threeDayBundle, importedLessons]);
 
-  // Filter lessons based on selected shift or personal imported filter
-  const filteredLessons = baseLessons.filter((lesson) => {
-    if (showOnlyImportedLessons && importedLessons.length > 0) {
-      return lesson.category === 'custom-imported';
-    }
-    if (selectedShift === 'day') {
-      return ['calibration', 'vacuum-pump', 'shift-handover', '3day-auto-update', 'custom-imported'].includes(lesson.category || '');
-    }
-    if (selectedShift === 'night') {
-      return ['error-code', 'safety-loto', 'wafer-transfer', '3day-auto-update', 'custom-imported'].includes(lesson.category || '');
-    }
-    return true;
-  });
+  const dueLessonsCount = React.useMemo(
+    () => getDueLessonsCount(baseLessons, srsMap),
+    [baseLessons, srsMap]
+  );
 
-  const activeLessons = filteredLessons.length > 0 ? filteredLessons : baseLessons;
-  const displayedLessons = activeLessons;
+  // Filter lessons based on selected shift, due review filter, or personal imported filter
+  const filteredLessons = React.useMemo(() => {
+    return baseLessons.filter((lesson) => {
+      if (showOnlyDueLessons && !isLessonDueForReview(lesson.id, srsMap)) {
+        return false;
+      }
+      if (showOnlyImportedLessons && importedLessons.length > 0) {
+        return (
+          lesson.category === 'custom-imported' ||
+          importedLessons.some((il) => il.id === lesson.id || il.english_sentence === lesson.english_sentence)
+        );
+      }
+      if (selectedShift === 'day') {
+        return ['calibration', 'vacuum-pump', 'shift-handover', '3day-auto-update', 'custom-imported'].includes(lesson.category || '');
+      }
+      if (selectedShift === 'night') {
+        return ['error-code', 'safety-loto', 'wafer-transfer', '3day-auto-update', 'custom-imported'].includes(lesson.category || '');
+      }
+      return true;
+    });
+  }, [baseLessons, showOnlyDueLessons, srsMap, showOnlyImportedLessons, importedLessons, selectedShift]);
+
+  const displayedLessons = React.useMemo(
+    () => (filteredLessons.length > 0 ? filteredLessons : baseLessons),
+    [filteredLessons, baseLessons]
+  );
   displayedLessonsRef.current = displayedLessons;
+
+  // Keep currentDailyIndex within bounds whenever active list size changes
+  useEffect(() => {
+    if (displayedLessons.length > 0 && currentDailyIndex >= displayedLessons.length) {
+      setCurrentDailyIndex(0);
+    }
+  }, [displayedLessons.length, currentDailyIndex]);
+
+  // Real English sentence list for AI duplicate prevention
+  const knownLessonSentences = React.useMemo(
+    () => Array.from(new Set(baseLessons.map((l) => l.english_sentence).filter(Boolean))),
+    [baseLessons]
+  );
+
+  // User custom-added vocabulary count for Header badge (excludes default 30 AOI preset)
+  const customImportedVocabCount = React.useMemo(
+    () => importedVocab.filter((v) => !String(v.id || '').startsWith('aoi-')).length,
+    [importedVocab]
+  );
 
   // 1. 全域半導體高頻術語與教材音訊閒置背景預熱
   useEffect(() => {
@@ -591,9 +812,18 @@ export default function App() {
   // Enhanced Deep Automation Auto-Pilot Cruise effect
   useEffect(() => {
     let countdownTimer: any = null;
+    let stepTimer: ReturnType<typeof setTimeout> | null = null;
     let isCancelled = false;
 
-    if (isAutoPilot && activeTab === 'daily') {
+    const cleanSvoSegment = (raw?: string) =>
+      String(raw || '')
+        .replace(/\s*[\(（\[【\{][^\)）\]\}]*[\)）\]\}]/g, '')
+        .replace(/[\u4e00-\u9fa5]/g, '')
+        .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    if (isAutoPilot && activeTab === 'daily' && displayedLessons.length > 0) {
       const currentLesson = displayedLessons[currentDailyIndex % displayedLessons.length];
       if (!currentLesson) return;
 
@@ -603,15 +833,16 @@ export default function App() {
       const executeSequence = () => {
         if (isCancelled) return;
 
-        // Auto mark lesson as visited
-        if (!visitedLessonIds.includes(currentLesson.id)) {
-          setVisitedLessonIds((prev) => {
-            if (prev.includes(currentLesson.id)) return prev;
-            const updated = [...prev, currentLesson.id];
-            try { localStorage.setItem('fse_visited_lessons', JSON.stringify(updated)); } catch (e) {}
-            return updated;
-          });
-        }
+        // Auto mark lesson as visited with server sync
+        setVisitedLessonIds((prev) => {
+          if (prev.includes(currentLesson.id)) return prev;
+          const updated = [...prev, currentLesson.id];
+          try {
+            localStorage.setItem('fse_visited_lessons', JSON.stringify(updated));
+            queueAutoServerSync(4000);
+          } catch {}
+          return updated;
+        });
 
         const onFinishedSpeech = () => {
           if (isCancelled) return;
@@ -620,6 +851,7 @@ export default function App() {
           let remaining = autoPilotInterval;
           setAutoPilotCountdown(remaining);
 
+          if (countdownTimer) clearInterval(countdownTimer);
           countdownTimer = setInterval(() => {
             if (isCancelled) return;
             remaining -= 1;
@@ -628,11 +860,9 @@ export default function App() {
             if (remaining <= 0) {
               clearInterval(countdownTimer);
               if (autoPilotRepeat) {
-                // Repeat same lesson cleanly
                 setIsSpeakingInCruise(true);
                 executeSequence();
               } else {
-                // Advance to next lesson automatically
                 setCurrentDailyIndex((prev) => (prev + 1) % displayedLessons.length);
               }
             }
@@ -640,27 +870,52 @@ export default function App() {
         };
 
         if (autoPilotMode === 'english') {
-          speakEnglish(currentLesson.english_sentence, speechSpeed, onFinishedSpeech);
+          const slowSpd = Math.max(0.7, Number((speechSpeed * 0.85).toFixed(2)));
+          globalAudioScheduler.scheduleSequence(
+            [
+              { text: currentLesson.english_sentence, lang: 'en-US', rate: slowSpd, bufferAfterMs: 320 },
+              { text: currentLesson.english_sentence, lang: 'en-US', rate: speechSpeed, bufferAfterMs: 180 }
+            ],
+            {
+              interrupt: true,
+              isCancelled: () => isCancelled,
+              onSequenceEnd: onFinishedSpeech
+            }
+          );
         } else if (autoPilotMode === 'bilingual') {
-          speakEnglish(currentLesson.english_sentence, speechSpeed, () => {
-            if (isCancelled) return;
-            setTimeout(() => {
-              if (isCancelled) return;
-              speakChinese(currentLesson.chinese_translation || currentLesson.scenario, 1.0, onFinishedSpeech);
-            }, 350);
-          });
+          const slowSpd = Math.max(0.7, Number((speechSpeed * 0.85).toFixed(2)));
+          const conciseZh = currentLesson.chinese_translation || currentLesson.scenario;
+          globalAudioScheduler.scheduleSequence(
+            [
+              { text: currentLesson.english_sentence, lang: 'en-US', rate: slowSpd, bufferAfterMs: 280 },
+              { text: conciseZh, lang: 'zh-TW', rate: 1.0, bufferAfterMs: 260 },
+              { text: currentLesson.english_sentence, lang: 'en-US', rate: speechSpeed, bufferAfterMs: 180 }
+            ],
+            {
+              interrupt: true,
+              isCancelled: () => isCancelled,
+              onSequenceEnd: onFinishedSpeech
+            }
+          );
         } else if (autoPilotMode === 'svo') {
-          speakEnglish(currentLesson.english_sentence, speechSpeed, () => {
-            if (isCancelled) return;
-            setTimeout(() => {
-              if (isCancelled) return;
-              const cleanSubject = currentLesson.components.subject.replace(/[\(（][^\)）]*[\)）]/g, '').trim();
-              const cleanAction = currentLesson.components.action.replace(/[\(（][^\)）]*[\)）]/g, '').trim();
-              const cleanObject = currentLesson.components.object.replace(/[\(（][^\)）]*[\)）]/g, '').trim();
-              const svoText = `Subject: ${cleanSubject}. Action: ${cleanAction}. Object: ${cleanObject}`;
-              speakEnglish(svoText, speechSpeed * 0.9, onFinishedSpeech);
-            }, 400);
-          });
+          const slowSpd = Math.max(0.7, Number((speechSpeed * 0.85).toFixed(2)));
+          const cleanSubject = cleanSvoSegment(currentLesson.components.subject);
+          const cleanAction = cleanSvoSegment(currentLesson.components.action);
+          const cleanBridge = cleanSvoSegment(currentLesson.components.bridge);
+          const cleanObject = cleanSvoSegment(currentLesson.components.object);
+          const svoText = [cleanSubject, cleanAction, cleanBridge, cleanObject].filter(Boolean).join(', ');
+          globalAudioScheduler.scheduleSequence(
+            [
+              { text: currentLesson.english_sentence, lang: 'en-US', rate: slowSpd, bufferAfterMs: 320 },
+              { text: svoText || currentLesson.english_sentence, lang: 'en-US', rate: slowSpd, bufferAfterMs: 300 },
+              { text: currentLesson.english_sentence, lang: 'en-US', rate: speechSpeed, bufferAfterMs: 180 }
+            ],
+            {
+              interrupt: true,
+              isCancelled: () => isCancelled,
+              onSequenceEnd: onFinishedSpeech
+            }
+          );
         }
       };
 
@@ -673,6 +928,7 @@ export default function App() {
     return () => {
       isCancelled = true;
       if (countdownTimer) clearInterval(countdownTimer);
+      if (stepTimer) clearTimeout(stepTimer);
       if (isAutoPilot) {
         cancelSpeech();
       }
@@ -685,7 +941,8 @@ export default function App() {
     autoPilotInterval,
     autoPilotRepeat,
     speechSpeed,
-    activeLessons
+    displayedLessons.length,
+    showOnlyImportedLessons
   ]);
 
   const handleMarkArticleRead = (artId: string) => {
@@ -699,7 +956,10 @@ export default function App() {
       // Update total articles read count
       setDiagnostics((diag) => {
         const next = { ...diag, totalArticlesRead: updated.length };
-        try { localStorage.setItem('fse_user_diagnostics', JSON.stringify(next)); } catch (e) {}
+        try {
+          localStorage.setItem('fse_user_diagnostics', JSON.stringify(next));
+          queueAutoServerSync(2500);
+        } catch (e) {}
         return next;
       });
 
@@ -711,7 +971,10 @@ export default function App() {
     setBookmarkedArticleIds((prev) => {
       const exists = prev.includes(artId);
       const updated = exists ? prev.filter((id) => id !== artId) : [...prev, artId];
-      try { localStorage.setItem('fse_bookmarked_articles', JSON.stringify(updated)); } catch (e) {}
+      try {
+        localStorage.setItem('fse_bookmarked_articles', JSON.stringify(updated));
+        queueAutoServerSync(2500);
+      } catch (e) {}
       return updated;
     });
   };
@@ -745,7 +1008,10 @@ export default function App() {
         primaryWeakness: errs[0].name
       };
 
-      try { localStorage.setItem('fse_user_diagnostics', JSON.stringify(nextDiag)); } catch (e) {}
+      try {
+        localStorage.setItem('fse_user_diagnostics', JSON.stringify(nextDiag));
+        queueAutoServerSync(3500);
+      } catch (e) {}
       return nextDiag;
     });
   };
@@ -829,7 +1095,10 @@ export default function App() {
         }
       };
 
-      try { localStorage.setItem('fse_user_diagnostics', JSON.stringify(updatedDiag)); } catch (e) {}
+      try {
+        localStorage.setItem('fse_user_diagnostics', JSON.stringify(updatedDiag));
+        queueAutoServerSync(3500);
+      } catch (e) {}
       return updatedDiag;
     });
   }, []);
@@ -878,6 +1147,23 @@ export default function App() {
     });
   }, []);
 
+  const handleRateMemory = useCallback((lessonId: string, rating: MemoryRating) => {
+    const { map: updatedMap } = rateLessonMemory(lessonId, rating);
+    setSrsMap(updatedMap);
+    handleMarkVisited(lessonId);
+    setDiagnostics((prev) => {
+      const nextDiag: UserDiagnostics = {
+        ...prev,
+        totalSentencesPracticed: (prev.totalSentencesPracticed || 0) + 1
+      };
+      try {
+        localStorage.setItem('fse_user_diagnostics', JSON.stringify(nextDiag));
+      } catch {}
+      return nextDiag;
+    });
+    queueAutoServerSync(2500);
+  }, [handleMarkVisited]);
+
   const handleToggleBookmark = useCallback((lesson: Lesson) => {
     setBookmarkedLessons((prev) => {
       const exists = prev.some((l) => l.id === lesson.id || l.english_sentence === lesson.english_sentence);
@@ -899,19 +1185,28 @@ export default function App() {
 
   const handleGoalCompleted = () => {
     setIsWaferPulseActive(true);
-    setTimeout(() => setIsWaferPulseActive(false), 2000);
+    if (pulseTimerRef.current) clearTimeout(pulseTimerRef.current);
+    pulseTimerRef.current = setTimeout(() => {
+      pulseTimerRef.current = null;
+      if (isMountedRef.current) setIsWaferPulseActive(false);
+    }, 2000);
 
     setStreakCount((prev) => {
       const next = prev + 1;
       try {
         localStorage.setItem('fse_streak', next.toString());
+        queueAutoServerSync(2000);
       } catch (e) {
         console.warn("Failed saving streak:", e);
       }
 
       // Trigger Badge Modal on milestone thresholds (3, 5, 7, 10)
       if ([3, 5, 7, 10].includes(next)) {
-        setTimeout(() => setIsBadgeModalOpen(true), 600);
+        if (badgeTimerRef.current) clearTimeout(badgeTimerRef.current);
+        badgeTimerRef.current = setTimeout(() => {
+          badgeTimerRef.current = null;
+          if (isMountedRef.current) setIsBadgeModalOpen(true);
+        }, 600);
       }
 
       return next;
@@ -940,9 +1235,10 @@ export default function App() {
           setActiveTab={handleSetActiveTab}
           bookmarkCount={bookmarkedLessons.length}
           importedCount={importedVocab.length}
+          badgeImportedCount={customImportedVocabCount}
           onOpenSystemHealth={() => setIsSystemHealthModalOpen(true)}
           onOpenVoiceSettings={() => setIsVoiceSettingsOpen(true)}
-          isOffline={offlineStatus.isOffline}
+          isOffline={offlineStatus.isOffline || offlineStatus.isSimulatedOffline}
           onOpenOfflineModal={offlineStatus.openOfflineFlashcards}
           onOpenSearchModal={() => setIsSearchModalOpen(true)}
           onOpenEmergencyModal={() => setIsEmergencyModalOpen(true)}
@@ -967,69 +1263,115 @@ export default function App() {
 
       {/* Main Container with Motion Animation Transitions */}
       <main ref={mainContainerRef} className={`flex-1 max-w-6xl w-full mx-auto transition-all min-w-0 ${
-        isCompact ? 'px-2 sm:px-4 pt-1 pb-12 md:pb-1 space-y-1.5' : 'px-2.5 sm:px-4 pt-1 sm:pt-1.5 pb-14 md:pb-1 space-y-1.5'
+        isCompact ? 'px-2.5 sm:px-5 pt-2 pb-18 md:pb-4 space-y-2' : 'px-3 sm:px-5 pt-2.5 sm:pt-4 pb-20 md:pb-5 space-y-2.5'
       }`}>
 
         <AnimatePresence mode="wait">
           <motion.div
             key={activeTab}
-            initial={{ opacity: 0, y: 8 }}
+            initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
+            exit={{ opacity: 0, y: -6 }}
             transition={{ duration: 0.15 }}
             className="w-full min-w-0 max-w-full"
           >
             {/* Tab 1: Daily Featured Cleanroom Lesson */}
             {activeTab === 'daily' && (
-              <div className="w-full min-w-0 space-y-1.5">
+              <div className="w-full min-w-0 space-y-2.5">
                 
                 {/* Minimal Mode Active Banner */}
                 {isMinimal && (
-                  <div className="bg-cyan-950/80 border border-cyan-500/40 rounded-xl px-3 py-1.5 flex items-center justify-between text-xs text-cyan-200 backdrop-blur-md break-words">
-                    <span className="font-bold">極簡模式</span>
+                  <div className="bg-cyan-950/80 border border-cyan-500/40 rounded-xl px-3.5 py-2 flex items-center justify-between text-xs text-cyan-200 backdrop-blur-md break-words">
+                    <span className="font-bold">極簡專注模式</span>
                     <button
                       onClick={toggleMinimalMode}
-                      className="text-cyan-400 hover:underline font-bold cursor-pointer shrink-0 ml-2"
+                      className="text-cyan-300 hover:text-white font-bold cursor-pointer shrink-0 ml-2 px-2 py-0.5 rounded-lg bg-cyan-500/15"
                     >
                       退出
                     </button>
                   </div>
                 )}
 
-                {/* Personal Imported & AOI English Filter Bar */}
-                {importedLessons.length > 0 && (
-                  <div className="bg-slate-900/95 border border-cyan-500/30 rounded-xl px-3 py-1.5 flex items-center justify-between gap-2 flex-wrap">
-                    <div className="flex items-center gap-2 text-xs">
-                      <FolderOpen className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                      <span className="font-bold text-slate-200">
-                        AOI 設備與導入教材：{importedVocab.length} 單音 · {importedLessons.length} 句
+                {/* Daily Readiness Summary Strip (Clean Unboxed Editorial Metadata) */}
+                {!isMinimal && (
+                  <div className="px-1 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-xs font-mono text-slate-400 tabular-nums">
+                    <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+                      <span className="inline-flex items-center gap-1 text-amber-300 font-bold">
+                        <Flame className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                        <span>連續 {streakCount} 天</span>
                       </span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
+                      <span className="text-slate-700">·</span>
+                      <span>
+                        今日進度 <strong className="text-slate-200">{visitedLessonIds.length}</strong>/{baseLessons.length} 關
+                      </span>
+                      <span className="text-slate-700">·</span>
                       <button
+                        type="button"
                         onClick={() => {
                           playClickSound();
-                          setShowOnlyImportedLessons((prev) => !prev);
+                          setShowOnlyDueLessons((prev) => !prev);
                           setCurrentDailyIndex(0);
                         }}
-                        className={`px-2.5 py-1 rounded-lg text-xs font-black cursor-pointer transition-all ${
-                          showOnlyImportedLessons
-                            ? 'bg-cyan-400 text-slate-950'
-                            : 'bg-slate-950 text-cyan-300 border border-cyan-500/40 hover:bg-slate-800'
+                        className={`cursor-pointer transition-colors ${
+                          showOnlyDueLessons
+                            ? 'text-amber-300 font-black underline underline-offset-4'
+                            : dueLessonsCount > 0
+                            ? 'text-cyan-300 hover:text-cyan-200 font-bold'
+                            : 'text-emerald-400 font-bold'
                         }`}
+                        title="點擊切換只練習待複習關卡"
                       >
-                        {showOnlyImportedLessons ? '全部關卡' : '僅看導入'}
+                        {dueLessonsCount > 0 ? `待複習 ${dueLessonsCount} 句` : '今日記憶已清空'}
                       </button>
+                      <span className="text-slate-700 hidden sm:inline">·</span>
                       <button
+                        type="button"
                         onClick={() => {
                           playClickSound();
-                          setIsMediaImportModalOpen(true);
+                          handleSetActiveTab('knowledge', 'bookmarks');
                         }}
-                        className="px-2.5 py-1 rounded-lg bg-amber-400/20 hover:bg-amber-400/30 text-amber-300 border border-amber-400/40 text-xs font-black cursor-pointer"
+                        className="hidden sm:inline text-slate-300 hover:text-amber-300 transition-colors cursor-pointer"
                       >
-                        AOI 公開教材與單音卡
+                        收藏 {bookmarkedLessons.length} 句
                       </button>
                     </div>
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          playClickSound();
+                          setIsHandoverDrillOpen(true);
+                        }}
+                        className="text-amber-300 hover:text-amber-200 font-bold flex items-center gap-1 cursor-pointer transition-colors"
+                      >
+                        <Timer className="w-3.5 h-3.5 shrink-0" />
+                        <span>60s 交接考核</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          playClickSound();
+                          handleSetActiveTab('knowledge', 'tutor');
+                        }}
+                        className="text-emerald-300 hover:text-emerald-200 font-bold flex items-center gap-1 cursor-pointer transition-colors"
+                      >
+                        <Bot className="w-3.5 h-3.5 shrink-0" />
+                        <span>AI 教練提問</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {showOnlyDueLessons && filteredLessons.length === 0 && (
+                  <div className="bg-emerald-950/50 border border-emerald-500/40 rounded-xl px-3.5 py-2 flex items-center justify-between gap-2 text-xs text-emerald-200">
+                    <span>所有句型皆已通過目前複習排程，已為您自動切換回完整教材檢視。</span>
+                    <button
+                      type="button"
+                      onClick={() => setShowOnlyDueLessons(false)}
+                      className="px-2.5 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-100 font-bold shrink-0 cursor-pointer"
+                    >
+                      顯示全部
+                    </button>
                   </div>
                 )}
 
@@ -1043,7 +1385,7 @@ export default function App() {
                   onMarkVisited={handleMarkVisited}
                   onNextLesson={() => setCurrentDailyIndex((prev) => (prev + 1) % displayedLessons.length)}
                   onPrevLesson={() => setCurrentDailyIndex((prev) => (prev - 1 + displayedLessons.length) % displayedLessons.length)}
-                  currentIndex={currentDailyIndex}
+                  currentIndex={currentDailyIndex % Math.max(1, displayedLessons.length)}
                   totalLessons={displayedLessons.length}
                   allLessons={displayedLessons}
                   visitedLessonIds={visitedLessonIds}
@@ -1054,31 +1396,90 @@ export default function App() {
                   hoursLeft={hoursLeft}
                   minutesLeft={minutesLeft}
                   onRefreshQuestions={triggerManualUpdate}
+                  disableGlobalShortcuts={anyModalOpen}
+                  srsState={currentDailyLesson ? srsMap[currentDailyLesson.id] : undefined}
+                  onRateMemory={handleRateMemory}
                 />
 
-                {/* Humanized Cleanroom Quick-Tool & Auto-Pilot Bar */}
+                {/* Cleanroom Bottom Action Bar */}
                 {!isMinimal && (
-                  <div className="bg-slate-900/95 border border-slate-800/90 rounded-2xl px-3 py-2 flex flex-wrap items-center justify-between gap-2 shadow-md backdrop-blur-sm">
-                    {/* Left: Auto-Pilot Cruise Controls */}
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <button
-                        onClick={() => {
-                          playClickSound();
-                          setIsAutoPilot((prev) => !prev);
-                        }}
-                        className={`px-2.5 py-1 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
-                          isAutoPilot
-                            ? 'bg-amber-400 text-slate-950 border-amber-300 shadow-sm shadow-amber-400/20 animate-pulse'
-                            : 'bg-slate-950 hover:bg-slate-800 text-cyan-300 border-slate-800'
-                        }`}
-                        title="免動手自動巡航朗讀所有關卡句型（適合通勤或穿無塵衣前複習）"
-                      >
-                        {isAutoPilot ? <Pause className="w-3.5 h-3.5" /> : <Headphones className="w-3.5 h-3.5 text-cyan-400" />}
-                        <span>{isAutoPilot ? `連播中 (${ isSpeakingInCruise ? '朗讀' : `${autoPilotCountdown}s` })` : '自動連播'}</span>
-                      </button>
+                  <div className="bg-slate-900/95 border border-slate-700/80 rounded-2xl px-3 sm:px-3.5 py-2.5 sm:py-3 space-y-2.5 shadow-xl shadow-black/30 backdrop-blur-md">
+                    <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center justify-between gap-2">
+                      {/* Left: Auto-Pilot Cruise & Imported Filter */}
+                      <div className="grid grid-cols-3 sm:flex items-center gap-1.5 sm:gap-2 flex-wrap w-full sm:w-auto">
+                        <button
+                          type="button"
+                          aria-pressed={isAutoPilot}
+                          onClick={() => {
+                            playClickSound();
+                            setIsAutoPilot((prev) => !prev);
+                          }}
+                          className={`min-h-[38px] px-2 sm:px-3.5 py-1.5 rounded-xl text-xs font-black flex items-center justify-center gap-1 sm:gap-1.5 transition-all cursor-pointer border whitespace-nowrap active:scale-95 tabular-nums focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${
+                            isAutoPilot
+                              ? 'bg-amber-400 text-slate-950 border-amber-300 shadow-md shadow-amber-500/20'
+                              : 'bg-slate-950/90 hover:bg-slate-800 text-cyan-200 border-slate-700/80 hover:border-cyan-400/50'
+                          }`}
+                          title="免動手自動巡航朗讀所有關卡句型"
+                        >
+                          {isAutoPilot ? <Pause className="w-3.5 h-3.5 shrink-0" /> : <Headphones className="w-3.5 h-3.5 text-cyan-400 shrink-0" />}
+                          <span>{isAutoPilot ? `連播 (${isSpeakingInCruise ? '讀' : `${autoPilotCountdown}s`})` : '自動連播'}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          aria-pressed={showOnlyDueLessons}
+                          onClick={() => {
+                            playClickSound();
+                            setShowOnlyDueLessons((prev) => !prev);
+                            setCurrentDailyIndex(0);
+                          }}
+                          className={`min-h-[38px] px-2 sm:px-3.5 py-1.5 rounded-xl text-xs font-bold cursor-pointer transition-all border whitespace-nowrap active:scale-95 tabular-nums flex items-center justify-center gap-1 sm:gap-1.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${
+                            showOnlyDueLessons
+                              ? 'bg-amber-400 text-slate-950 border-amber-300 font-black shadow-md shadow-amber-500/20'
+                              : 'bg-slate-950/90 text-amber-200 border-slate-700/80 hover:bg-slate-800 hover:border-amber-400/50'
+                          }`}
+                          title="依 SM-2 記憶曲線篩選目前需要複習的句型"
+                        >
+                          <Clock className={`w-3.5 h-3.5 shrink-0 ${showOnlyDueLessons ? 'text-slate-950' : 'text-amber-400'}`} />
+                          <span>
+                            {showOnlyDueLessons
+                              ? `複習 (${filteredLessons.length})`
+                              : `待複習 (${dueLessonsCount})`}
+                          </span>
+                        </button>
+
+                        <button
+                          type="button"
+                          aria-pressed={showOnlyImportedLessons}
+                          onClick={() => {
+                            playClickSound();
+                            if (importedLessons.length === 0) {
+                              setIsMediaImportModalOpen(true);
+                              return;
+                            }
+                            setShowOnlyImportedLessons((prev) => !prev);
+                            setCurrentDailyIndex(0);
+                          }}
+                          className={`min-h-[38px] px-2 sm:px-3.5 py-1.5 rounded-xl text-xs font-bold cursor-pointer transition-all border whitespace-nowrap active:scale-95 tabular-nums flex items-center justify-center gap-1 sm:gap-1.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
+                            showOnlyImportedLessons && importedLessons.length > 0
+                              ? 'bg-cyan-400 text-slate-950 border-cyan-300 font-black shadow-md shadow-cyan-500/20'
+                              : 'bg-slate-950/90 text-cyan-200 border-slate-700/80 hover:bg-slate-800 hover:border-cyan-400/50'
+                          }`}
+                          title={importedLessons.length > 0 ? '切換僅練習導入教材或全部教材' : '尚無導入教材，點擊立即導入'}
+                        >
+                          <FolderOpen className={`w-3.5 h-3.5 shrink-0 ${showOnlyImportedLessons ? 'text-slate-950' : 'text-cyan-400'}`} />
+                          <span>
+                            {importedLessons.length === 0
+                              ? '導入 (0)'
+                              : showOnlyImportedLessons
+                              ? `導入 (${importedLessons.length})`
+                              : `導入 (${importedLessons.length})`}
+                          </span>
+                        </button>
+                      </div>
 
                       {isAutoPilot && (
-                        <div className="flex items-center gap-1 bg-slate-950 p-0.5 rounded-lg border border-slate-800">
+                        <div className="flex items-center justify-between sm:justify-start gap-1 bg-slate-950/95 p-1 rounded-xl border border-slate-700/80 flex-wrap w-full sm:w-auto">
                           {[
                             { id: 'english', label: '純英' },
                             { id: 'bilingual', label: '雙語' },
@@ -1086,11 +1487,13 @@ export default function App() {
                           ].map((m) => (
                             <button
                               key={m.id}
+                              type="button"
+                              aria-pressed={autoPilotMode === m.id}
                               onClick={() => {
                                 playClickSound();
                                 setAutoPilotMode(m.id as any);
                               }}
-                              className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all cursor-pointer ${
+                              className={`min-h-[30px] px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors cursor-pointer whitespace-nowrap ${
                                 autoPilotMode === m.id
                                   ? 'bg-cyan-400 text-slate-950 font-black'
                                   : 'text-slate-400 hover:text-slate-200'
@@ -1100,102 +1503,161 @@ export default function App() {
                             </button>
                           ))}
                           <button
+                            type="button"
+                            aria-pressed={autoPilotRepeat}
                             onClick={() => {
                               playClickSound();
                               setAutoPilotRepeat((prev) => !prev);
                             }}
-                            className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold flex items-center gap-0.5 transition-all cursor-pointer ${
+                            className={`min-h-[30px] px-2 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap ${
                               autoPilotRepeat
                                 ? 'bg-amber-400 text-slate-950 font-black'
                                 : 'text-slate-400 hover:text-slate-200'
                             }`}
-                            title="單句循環"
+                            title="單句循環模式"
                           >
-                            <Repeat className="w-3 h-3" />
+                            <Repeat className="w-3 h-3 shrink-0" />
                             <span>循環</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              playClickSound();
+                              setAutoPilotInterval((prev) => (prev === 3 ? 5 : prev === 5 ? 8 : 3));
+                            }}
+                            className="min-h-[30px] px-2 py-1 rounded-lg text-[11px] font-mono font-bold text-cyan-300 bg-slate-900 hover:bg-slate-800 border border-slate-700/80 cursor-pointer whitespace-nowrap tabular-nums"
+                            title="切換每句切換間隔秒數 (3s / 5s / 8s)"
+                          >
+                            間隔 {autoPilotInterval}s
                           </button>
                         </div>
                       )}
+
+                      {/* Right: Primary AI Toggle + Collapsible Toolbox Toggle */}
+                      <div className="grid grid-cols-2 sm:flex items-center gap-1.5 sm:gap-2 w-full sm:w-auto">
+                        <button
+                          type="button"
+                          aria-expanded={showAiGenerator}
+                          onClick={() => {
+                            playClickSound();
+                            setShowAiGenerator((prev) => {
+                              const next = !prev;
+                              if (next) {
+                                if (scrollTimerRef.current) {
+                                  clearTimeout(scrollTimerRef.current);
+                                }
+                                scrollTimerRef.current = setTimeout(() => {
+                                  scrollTimerRef.current = null;
+                                  aiDrawerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                                }, 120);
+                              }
+                              return next;
+                            });
+                          }}
+                          className={`min-h-[38px] px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer whitespace-nowrap active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${
+                            showAiGenerator
+                              ? 'bg-amber-400 text-slate-950 border-amber-300 font-black shadow-md shadow-amber-500/20'
+                              : 'bg-slate-950/90 hover:bg-slate-800 text-amber-300 border-slate-700/80 hover:border-amber-400/50'
+                          }`}
+                        >
+                          <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                          <span>{showAiGenerator ? '收起生成' : 'AI 生成'}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          aria-expanded={showDailyToolbox}
+                          onClick={() => {
+                            playClickSound();
+                            setShowDailyToolbox((prev) => !prev);
+                          }}
+                          className={`min-h-[38px] px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer whitespace-nowrap active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
+                            showDailyToolbox
+                              ? 'bg-cyan-400 text-slate-950 border-cyan-300 font-black shadow-md shadow-cyan-500/20'
+                              : 'bg-slate-950/90 hover:bg-slate-800 text-slate-200 border-slate-700/80 hover:border-cyan-400/40'
+                          }`}
+                        >
+                          <span>工具箱 {showDailyToolbox ? '▴' : '▾'}</span>
+                        </button>
+                      </div>
                     </div>
 
-                    {/* Right: AI & Interactive Quick Tools */}
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <button
-                        onClick={() => {
-                          playClickSound();
-                          setIsMediaImportModalOpen(true);
-                        }}
-                        className="px-2.5 py-1 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-200 border border-cyan-500/40 text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer"
-                        title="導入照片或檔案單音"
-                      >
-                        <Upload className="w-3.5 h-3.5 text-cyan-400" />
-                        <span>導入單音</span>
-                      </button>
+                    {/* Collapsible Secondary Tools Drawer */}
+                    {showDailyToolbox && (
+                      <div className="pt-2.5 border-t border-slate-800/90 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            playClickSound();
+                            setIsMediaImportModalOpen(true);
+                          }}
+                          className="min-h-[38px] px-2.5 py-1.5 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-200 border border-cyan-500/40 text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+                        >
+                          <Upload className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                          <span>導入單音</span>
+                        </button>
 
-                      <button
-                        onClick={() => {
-                          playClickSound();
-                          setShowAiGenerator((prev) => !prev);
-                        }}
-                        className={`px-2.5 py-1 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                          showAiGenerator
-                            ? 'bg-amber-400 text-slate-950 border-amber-300 font-black'
-                            : 'bg-slate-950 hover:bg-slate-800 text-amber-300 border-slate-800 hover:border-amber-500/40'
-                        }`}
-                        title="AI 情境生成"
-                      >
-                        <Sparkles className="w-3.5 h-3.5" />
-                        <span>{showAiGenerator ? '收起生成' : 'AI 生成'}</span>
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            playClickSound();
+                            setIsDecomposerModalOpen(true);
+                          }}
+                          className="min-h-[38px] px-2.5 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 text-amber-300 border border-slate-700/80 hover:border-amber-400/50 text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+                        >
+                          <Wand2 className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                          <span>AI 拆句</span>
+                        </button>
 
-                      <button
-                        onClick={() => {
-                          playClickSound();
-                          setIsDecomposerModalOpen(true);
-                        }}
-                        className="px-2.5 py-1 rounded-xl bg-slate-950 hover:bg-slate-800 text-amber-300 border border-slate-800 hover:border-amber-500/40 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
-                        title="AI 拆句"
-                      >
-                        <Wand2 className="w-3.5 h-3.5 text-amber-400" />
-                        <span>AI 拆句</span>
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            playClickSound();
+                            setIsErrorCodeModalOpen(true);
+                          }}
+                          className="min-h-[38px] px-2.5 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 text-rose-300 border border-slate-700/80 hover:border-rose-400/50 text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+                        >
+                          <Cpu className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                          <span>警報交接</span>
+                        </button>
 
-                      <button
-                        onClick={() => {
-                          playClickSound();
-                          setIsErrorCodeModalOpen(true);
-                        }}
-                        className="px-2.5 py-1 rounded-xl bg-slate-950 hover:bg-slate-800 text-rose-300 border border-slate-800 hover:border-rose-500/40 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
-                        title="故障碼交接"
-                      >
-                        <Cpu className="w-3.5 h-3.5 text-rose-400" />
-                        <span>故障碼</span>
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            playClickSound();
+                            setIsMatchGameModalOpen(true);
+                          }}
+                          className="min-h-[38px] px-2.5 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 text-emerald-300 border border-slate-700/80 hover:border-emerald-400/50 text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+                        >
+                          <Gamepad2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                          <span>術語配對</span>
+                        </button>
 
-                      <button
-                        onClick={() => {
-                          playClickSound();
-                          setIsMatchGameModalOpen(true);
-                        }}
-                        className="px-2.5 py-1 rounded-xl bg-slate-950 hover:bg-slate-800 text-emerald-300 border border-slate-800 hover:border-emerald-500/40 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
-                        title="術語配對"
-                      >
-                        <Gamepad2 className="w-3.5 h-3.5 text-emerald-400" />
-                        <span>配對</span>
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            playClickSound();
+                            setIsScenarioModalOpen(true);
+                          }}
+                          className="min-h-[38px] px-2.5 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 text-indigo-300 border border-slate-700/80 hover:border-indigo-400/50 text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+                        >
+                          <Zap className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                          <span>情境闖關</span>
+                        </button>
 
-                      <button
-                        onClick={() => {
-                          playClickSound();
-                          handleSetActiveTab('knowledge', 'bookmarks');
-                        }}
-                        className="px-2.5 py-1 rounded-xl bg-slate-950 hover:bg-slate-800 text-cyan-300 border border-slate-800 hover:border-cyan-500/40 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
-                        title="收藏夾"
-                      >
-                        <Bookmark className="w-3.5 h-3.5 text-cyan-400" />
-                        <span>收藏 ({bookmarkedLessons.length})</span>
-                      </button>
-                    </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            playClickSound();
+                            handleSetActiveTab('knowledge', 'bookmarks');
+                          }}
+                          className="min-h-[38px] px-2.5 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 text-cyan-300 border border-slate-700/80 hover:border-cyan-400/50 text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+                        >
+                          <Bookmark className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                          <span>收藏 ({bookmarkedLessons.length})</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1203,6 +1665,7 @@ export default function App() {
                 <AnimatePresence>
                   {showAiGenerator && !isMinimal && (
                     <motion.div
+                      ref={aiDrawerRef}
                       key="ai-generator-drawer"
                       initial={{ opacity: 0, y: -8, scale: 0.99 }}
                       animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -1210,12 +1673,15 @@ export default function App() {
                       transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
                       className="pt-1 gpu-smooth"
                     >
-                      <AiLessonGenerator
-                        speechSpeed={speechSpeed}
-                        bookmarkedIds={bookmarkedLessons.map((b) => b.id)}
-                        onToggleBookmark={handleToggleBookmark}
-                        avoidSentences={visitedLessonIds}
-                      />
+                      <Suspense fallback={<div className="p-6 text-center text-xs text-slate-400">載入情境生成器...</div>}>
+                        <AiLessonGenerator
+                          speechSpeed={speechSpeed}
+                          bookmarkedIds={bookmarkedLessons.map((b) => b.id)}
+                          onToggleBookmark={handleToggleBookmark}
+                          avoidSentences={knownLessonSentences}
+                          onSaveToDeck={(newLesson) => handleSaveImportedData([], [newLesson])}
+                        />
+                      </Suspense>
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -1224,37 +1690,58 @@ export default function App() {
 
             {/* Tab 2: AI Speech Shadowing & Fluency Evaluation (PRO) */}
             {activeTab === 'shadowing' && (
-              <CleanroomSpeechShadowing />
+              <Suspense fallback={<div className="p-8 text-center text-xs text-slate-400">載入口說跟讀演練模組...</div>}>
+                <CleanroomSpeechShadowing
+                  lessons={displayedLessons}
+                  onShadowingScored={({ score: scoredValue, averageScore }) => {
+                    if (diagnostics) {
+                      const updatedDiag = {
+                        ...diagnostics,
+                        speechScoreAverage: averageScore,
+                        totalSentencesPracticed: (diagnostics.totalSentencesPracticed || 0) + 1,
+                        totalXp: (diagnostics.totalXp || 0) + (scoredValue >= 80 ? 15 : 5),
+                      };
+                      setDiagnostics(updatedDiag);
+                      try { localStorage.setItem('fse_user_diagnostics', JSON.stringify(updatedDiag)); } catch {}
+                    }
+                  }}
+                />
+              </Suspense>
             )}
 
             {/* Tab 3: Hands-Free Commute & Cleanroom Audio Player (AUDIO) */}
             {activeTab === 'drive' && (
-              <DriveModeTab
-                lessons={displayedLessons}
-                speechSpeed={speechSpeed}
-                setSpeechSpeed={setSpeechSpeed}
-                bookmarkedLessons={bookmarkedLessons}
-                onToggleBookmark={handleToggleBookmark}
-              />
+              <Suspense fallback={<div className="p-8 text-center text-xs text-slate-400">載入通勤免持聽力播放器...</div>}>
+                <DriveModeTab
+                  lessons={displayedLessons}
+                  speechSpeed={speechSpeed}
+                  setSpeechSpeed={setSpeechSpeed}
+                  bookmarkedLessons={bookmarkedLessons}
+                  onToggleBookmark={handleToggleBookmark}
+                />
+              </Suspense>
             )}
 
             {/* Tab 4: Fab Vendor & Equipment Deep-Dive Hub (NEW) */}
             {activeTab === 'vendors' && (
-              <FabVendorEquipmentHub />
+              <Suspense fallback={<div className="p-8 text-center text-xs text-slate-400">載入設備大廠術語專區...</div>}>
+                <FabVendorEquipmentHub />
+              </Suspense>
             )}
 
             {/* Tab 5: Fab Knowledge & Diagnostics Bank */}
             {activeTab === 'knowledge' && (
               <div className="space-y-2 w-full min-w-0">
                 {/* Cleanroom Knowledge Subtab Console Bar */}
-                <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-1.5 w-full backdrop-blur-md shadow-lg overflow-x-auto no-scrollbar litho-laser-line">
-                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-1.5 w-full relative">
+                <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-1.5 w-full backdrop-blur-md shadow-lg overflow-hidden litho-laser-line">
+                  <div className="grid grid-cols-4 sm:grid-cols-4 lg:grid-cols-7 gap-1 sm:gap-1.5 w-full relative">
                     {[
                       { id: 'vocab', label: '單字', icon: BookOpen, count: FAB_VOCAB.length + importedVocab.length },
                       { id: 'articles', label: '長文', icon: FileText, count: null },
                       { id: 'emergency', label: 'SOS', icon: ShieldAlert, count: null },
                       { id: 'scenario', label: '闖關', icon: Zap, count: null },
                       { id: 'bookmarks', label: '收藏', icon: Bookmark, count: bookmarkedLessons.length },
+                      { id: 'tutor', label: 'AI教練', icon: Bot, count: null },
                       { id: 'diagnostics', label: '診斷', icon: Activity, count: null }
                     ].map((sub) => {
                       const isSelected = knowledgeSubTab === sub.id;
@@ -1266,7 +1753,7 @@ export default function App() {
                             playClickSound();
                             setKnowledgeSubTab(sub.id as any);
                           }}
-                          className={`relative py-2.5 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 whitespace-nowrap cursor-pointer select-none group min-w-0 ${
+                          className={`relative py-2 px-1.5 sm:py-2.5 sm:px-3 rounded-xl text-[11px] sm:text-xs font-black transition-all flex items-center justify-center gap-1 sm:gap-1.5 whitespace-nowrap cursor-pointer select-none group min-w-0 ${
                             isSelected
                               ? 'text-slate-950 font-black shadow-md'
                               : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
@@ -1279,11 +1766,11 @@ export default function App() {
                               transition={{ type: 'spring', stiffness: 450, damping: 35 }}
                             />
                           )}
-                          <span className="relative z-10 flex items-center gap-1.5 min-w-0">
-                            <Icon className={`w-3.5 h-3.5 shrink-0 ${isSelected ? 'text-slate-950 stroke-[2.5]' : 'text-slate-400 group-hover:text-cyan-300'}`} />
+                          <span className="relative z-10 flex items-center gap-1 min-w-0">
+                            <Icon className={`w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0 ${isSelected ? 'text-slate-950 stroke-[2.5]' : 'text-slate-400 group-hover:text-cyan-300'}`} />
                             <span className="tracking-tight">{sub.label}</span>
                             {sub.count !== null && (
-                              <span className={`text-[10px] font-mono font-bold px-1.5 py-0.2 rounded shrink-0 ${
+                              <span className={`hidden sm:inline-block text-[10px] font-mono font-bold px-1.5 py-0.5 rounded leading-none shrink-0 tabular-nums ${
                                 isSelected ? 'bg-slate-950/20 text-slate-950' : 'bg-slate-800 text-slate-400'
                               }`}>
                                 {sub.count}
@@ -1305,6 +1792,7 @@ export default function App() {
                     transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
                     className="w-full min-w-0 gpu-smooth"
                   >
+                    <Suspense fallback={<div className="p-8 text-center text-xs text-slate-400">載入無塵室知識庫模組...</div>}>
                     {knowledgeSubTab === 'vocab' && (
                       <FabVocabBank
                         speechSpeed={speechSpeed}
@@ -1382,6 +1870,25 @@ export default function App() {
                         onMarkVisited={handleMarkVisited}
                         onOpenVoiceSettings={() => setIsVoiceSettingsOpen(true)}
                         onNavigateDaily={() => handleSetActiveTab('daily')}
+                        srsMap={srsMap}
+                        onRateMemory={handleRateMemory}
+                        onSendToDriveBookmarks={() => {
+                          try {
+                            localStorage.setItem('fse_drive_pending_category', 'bookmarks');
+                          } catch {}
+                          window.dispatchEvent(new CustomEvent('fse-drive-select-category', { detail: { category: 'bookmarks' } }));
+                          handleSetActiveTab('drive');
+                        }}
+                      />
+                    )}
+
+                    {knowledgeSubTab === 'tutor' && (
+                      <AiTutorChat
+                        speechSpeed={speechSpeed}
+                        onDecomposePhrase={(phrase) => {
+                          setDecomposerInitialSentence(phrase);
+                          setIsDecomposerModalOpen(true);
+                        }}
                       />
                     )}
 
@@ -1390,11 +1897,21 @@ export default function App() {
                         <DiagnosticsAndRemediation
                           diagnostics={diagnostics}
                           speechSpeed={speechSpeed}
+                          baseLessons={baseLessons}
                           bookmarkedLessons={bookmarkedLessons}
                           onToggleBookmark={handleToggleBookmark}
                           onUpdateDiagnostics={(nextDiag) => {
                             setDiagnostics(nextDiag);
                             try { localStorage.setItem('fse_user_diagnostics', JSON.stringify(nextDiag)); } catch (e) {}
+                          }}
+                          onPracticeDueLessons={() => {
+                            setShowOnlyDueLessons(true);
+                            handleSetActiveTab('daily');
+                          }}
+                          onOpenHandoverDrill={() => setIsHandoverDrillOpen(true)}
+                          onPracticeCustomSentence={(sentence, phonetic) => {
+                            setCustomSpeechTarget({ sentence, phonetic });
+                            setIsSpeechModalOpen(true);
                           }}
                         />
                         <AchievementTree
@@ -1407,6 +1924,7 @@ export default function App() {
                         />
                       </div>
                     )}
+                    </Suspense>
                   </motion.div>
                 </AnimatePresence>
               </div>
@@ -1421,140 +1939,201 @@ export default function App() {
       {/* Global Typography & Reading Ergonomics Optimizer */}
       <TypographyOptimizer />
 
-      {/* Modals */}
-      <InteractiveGuideModal
-        isOpen={isGuideOpen}
-        onClose={() => setIsGuideOpen(false)}
-      />
+      {/* Modals (Conditionally mounted & lazy-loaded on demand for zero idle overhead) */}
+      <Suspense fallback={null}>
+        {isGuideOpen && (
+          <InteractiveGuideModal
+            isOpen={isGuideOpen}
+            onClose={() => setIsGuideOpen(false)}
+          />
+        )}
 
-      <QuickCheatSheetModal
-        isOpen={isCheatSheetOpen}
-        onClose={() => setIsCheatSheetOpen(false)}
-        speechSpeed={speechSpeed}
-      />
+        {isCheatSheetOpen && (
+          <QuickCheatSheetModal
+            isOpen={isCheatSheetOpen}
+            onClose={() => setIsCheatSheetOpen(false)}
+            speechSpeed={speechSpeed}
+          />
+        )}
 
-      <SpeechPracticeModal
-        isOpen={isSpeechModalOpen}
-        onClose={() => setIsSpeechModalOpen(false)}
-        sentence={currentDailyLesson.english_sentence}
-        phonetic={currentDailyLesson.phonetic_taiwan}
-        speechSpeed={speechSpeed}
-        onRecordPauseHotspot={handleRecordPauseHotspot}
-      />
+        {isSpeechModalOpen && (
+          <SpeechPracticeModal
+            isOpen={isSpeechModalOpen}
+            onClose={() => {
+              setIsSpeechModalOpen(false);
+              setCustomSpeechTarget(null);
+            }}
+            sentence={customSpeechTarget?.sentence || currentDailyLesson.english_sentence}
+            phonetic={customSpeechTarget?.phonetic ?? currentDailyLesson.phonetic_taiwan}
+            speechSpeed={speechSpeed}
+            onRecordPauseHotspot={handleRecordPauseHotspot}
+          />
+        )}
 
-      <CleanroomBadgeModal
-        isOpen={isBadgeModalOpen}
-        onClose={() => setIsBadgeModalOpen(false)}
-        streakCount={streakCount}
-      />
+        {isHandoverDrillOpen && (
+          <ShiftHandoverTimedDrillModal
+            isOpen={isHandoverDrillOpen}
+            onClose={() => setIsHandoverDrillOpen(false)}
+            speechSpeed={speechSpeed}
+          />
+        )}
 
-      {/* AI Error Code Handover Modal */}
-      <AiErrorCodeGeneratorModal
-        isOpen={isErrorCodeModalOpen}
-        onClose={() => setIsErrorCodeModalOpen(false)}
-      />
+        {isBadgeModalOpen && (
+          <CleanroomBadgeModal
+            isOpen={isBadgeModalOpen}
+            onClose={() => setIsBadgeModalOpen(false)}
+            streakCount={streakCount}
+          />
+        )}
 
-      {/* AI Quick Decomposer Modal */}
-      <AiQuickDecomposerModal
-        isOpen={isDecomposerModalOpen}
-        onClose={() => setIsDecomposerModalOpen(false)}
-        onBookmarkLesson={handleToggleBookmark}
-      />
+        {isErrorCodeModalOpen && (
+          <AiErrorCodeGeneratorModal
+            isOpen={isErrorCodeModalOpen}
+            onClose={() => setIsErrorCodeModalOpen(false)}
+          />
+        )}
 
-      {/* Custom Photo & File Single-Sound English Import Modal */}
-      <CustomMediaImportModal
-        isOpen={isMediaImportModalOpen}
-        onClose={() => setIsMediaImportModalOpen(false)}
-        speechSpeed={speechSpeed}
-        importedVocab={importedVocab}
-        importedLessons={importedLessons}
-        onSaveImportedData={handleSaveImportedData}
-        onUpdateImportedVocab={handleUpdateImportedVocab}
-        onClearImportedData={handleClearImportedData}
-        onDeleteImportedVocab={handleDeleteImportedVocab}
-        onDeleteImportedLesson={handleDeleteImportedLesson}
-        onJumpToImportedLessons={() => {
-          setShowOnlyImportedLessons(true);
-          setCurrentDailyIndex(0);
-          handleSetActiveTab('daily');
-        }}
-      />
+        {isDecomposerModalOpen && (
+          <AiQuickDecomposerModal
+            isOpen={isDecomposerModalOpen}
+            onClose={() => setIsDecomposerModalOpen(false)}
+            onBookmarkLesson={handleToggleBookmark}
+            initialSentence={decomposerInitialSentence}
+          />
+        )}
 
-      {/* Cleanroom Scenario Ambience & High Contrast Tuning Modal */}
-      <CleanroomScenarioModal
-        isOpen={isCleanroomAmbienceModalOpen}
-        onClose={() => setIsCleanroomAmbienceModalOpen(false)}
-        currentScenario={currentScenario}
-        onSelectScenario={handleSelectScenario}
-        isHighContrast={isHighContrast}
-        onToggleHighContrast={handleToggleHighContrast}
-      />
+        {isMediaImportModalOpen && (
+          <CustomMediaImportModal
+            isOpen={isMediaImportModalOpen}
+            onClose={() => setIsMediaImportModalOpen(false)}
+            speechSpeed={speechSpeed}
+            importedVocab={importedVocab}
+            importedLessons={importedLessons}
+            onSaveImportedData={handleSaveImportedData}
+            onUpdateImportedVocab={handleUpdateImportedVocab}
+            onClearImportedData={handleClearImportedData}
+            onDeleteImportedVocab={handleDeleteImportedVocab}
+            onDeleteImportedLesson={handleDeleteImportedLesson}
+            onJumpToImportedLessons={() => {
+              setShowOnlyImportedLessons(true);
+              setCurrentDailyIndex(0);
+              handleSetActiveTab('daily');
+            }}
+          />
+        )}
 
-      {/* Voice Tuning & Pronunciation Center Modal */}
-      <VoiceSettingsModal
-        isOpen={isVoiceSettingsOpen}
-        onClose={() => setIsVoiceSettingsOpen(false)}
-        speechSpeed={speechSpeed}
-        setSpeechSpeed={setSpeechSpeed}
-      />
+        {isCleanroomAmbienceModalOpen && (
+          <CleanroomScenarioModal
+            isOpen={isCleanroomAmbienceModalOpen}
+            onClose={() => setIsCleanroomAmbienceModalOpen(false)}
+            currentScenario={currentScenario}
+            onSelectScenario={handleSelectScenario}
+            isHighContrast={isHighContrast}
+            onToggleHighContrast={handleToggleHighContrast}
+          />
+        )}
 
-      {/* Cleanroom Offline Flashcard Deck Modal */}
-      <OfflineCacheModal
-        isOpen={offlineStatus.isFlashcardsModalOpen}
-        onClose={offlineStatus.closeOfflineFlashcards}
-        speechSpeed={speechSpeed}
-        reviewedVocabIds={offlineStatus.reviewedVocabIds}
-        onToggleVocabReviewed={offlineStatus.toggleVocabReviewed}
-        isSimulatedOffline={offlineStatus.isSimulatedOffline}
-        onToggleSimulatedOffline={offlineStatus.toggleSimulatedOffline}
-      />
+        {isVoiceSettingsOpen && (
+          <VoiceSettingsModal
+            isOpen={isVoiceSettingsOpen}
+            onClose={() => setIsVoiceSettingsOpen(false)}
+            speechSpeed={speechSpeed}
+            setSpeechSpeed={setSpeechSpeed}
+          />
+        )}
 
-      {/* Fab Emergency & SOS Response Handbook Modal */}
-      <FabEmergencyModal
-        isOpen={isEmergencyModalOpen}
-        onClose={() => setIsEmergencyModalOpen(false)}
-        speechSpeed={speechSpeed}
-      />
+        {offlineStatus.isFlashcardsModalOpen && (
+          <OfflineCacheModal
+            isOpen={offlineStatus.isFlashcardsModalOpen}
+            onClose={offlineStatus.closeOfflineFlashcards}
+            speechSpeed={speechSpeed}
+            reviewedVocabIds={offlineStatus.reviewedVocabIds}
+            onToggleVocabReviewed={offlineStatus.toggleVocabReviewed}
+            isSimulatedOffline={offlineStatus.isSimulatedOffline}
+            onToggleSimulatedOffline={offlineStatus.toggleSimulatedOffline}
+          />
+        )}
 
-      {/* Interactive Fab Scenario Simulator Modal */}
-      <FabScenarioSimulatorModal
-        isOpen={isScenarioModalOpen}
-        onClose={() => setIsScenarioModalOpen(false)}
-        speechSpeed={speechSpeed}
-        onScenarioCompleted={(_xpGained) => handleGoalCompleted()}
-      />
+        {isEmergencyModalOpen && (
+          <FabEmergencyModal
+            isOpen={isEmergencyModalOpen}
+            onClose={() => setIsEmergencyModalOpen(false)}
+            speechSpeed={speechSpeed}
+          />
+        )}
 
-      {/* Global Universal Command Palette Search Modal */}
-      <GlobalCommandPaletteModal
-        isOpen={isSearchModalOpen}
-        onClose={() => setIsSearchModalOpen(false)}
-        speechSpeed={speechSpeed}
-        onNavigateTab={(tab, subTab) => handleSetActiveTab(tab, subTab)}
-        onOpenOfflineModal={offlineStatus.openOfflineFlashcards}
-        onOpenEmergencyModal={() => setIsEmergencyModalOpen(true)}
-        onOpenScenarioModal={() => setIsScenarioModalOpen(true)}
-        onOpenMatchGameModal={() => setIsMatchGameModalOpen(true)}
-        onOpenVoiceSettings={() => setIsVoiceSettingsOpen(true)}
-        onOpenSystemHealth={() => setIsSystemHealthModalOpen(true)}
-        onOpenDecomposerModal={() => setIsDecomposerModalOpen(true)}
-        onOpenErrorCodeModal={() => setIsErrorCodeModalOpen(true)}
-        onSelectLesson={(lessonId) => {
-          const foundIdx = displayedLessons.findIndex((l) => l.id === lessonId);
-          if (foundIdx >= 0) {
-            setCurrentDailyIndex(foundIdx);
-          }
-          handleSetActiveTab('daily');
-        }}
-      />
+        {isScenarioModalOpen && (
+          <FabScenarioSimulatorModal
+            isOpen={isScenarioModalOpen}
+            onClose={() => setIsScenarioModalOpen(false)}
+            speechSpeed={speechSpeed}
+            onScenarioCompleted={(_xpGained) => handleGoalCompleted()}
+          />
+        )}
 
-      {/* Semiconductor Term Match Game Modal */}
-      <VocabMatchGameModal
-        isOpen={isMatchGameModalOpen}
-        onClose={() => setIsMatchGameModalOpen(false)}
-        vocabPool={FAB_VOCAB}
-        speechSpeed={speechSpeed}
-        onCompletedGame={(_score, _matchCount) => handleGoalCompleted()}
-      />
+        {isSearchModalOpen && (
+          <GlobalCommandPaletteModal
+            isOpen={isSearchModalOpen}
+            onClose={() => setIsSearchModalOpen(false)}
+            speechSpeed={speechSpeed}
+            onNavigateTab={(tab, subTab) => handleSetActiveTab(tab, subTab)}
+            onOpenOfflineModal={offlineStatus.openOfflineFlashcards}
+            onOpenEmergencyModal={() => setIsEmergencyModalOpen(true)}
+            onOpenScenarioModal={() => setIsScenarioModalOpen(true)}
+            onOpenMatchGameModal={() => setIsMatchGameModalOpen(true)}
+            onOpenVoiceSettings={() => setIsVoiceSettingsOpen(true)}
+            onOpenSystemHealth={() => setIsSystemHealthModalOpen(true)}
+            onOpenDecomposerModal={(initialSentence?: string) => {
+              setDecomposerInitialSentence(initialSentence ? initialSentence : undefined);
+              setIsDecomposerModalOpen(true);
+            }}
+            onOpenErrorCodeModal={() => setIsErrorCodeModalOpen(true)}
+            onOpenMediaImportModal={() => setIsMediaImportModalOpen(true)}
+            onPracticeDueLessons={() => {
+              setShowOnlyDueLessons(true);
+              handleSetActiveTab('daily');
+            }}
+            importedVocab={importedVocab}
+            importedLessons={importedLessons}
+            bookmarkedLessons={bookmarkedLessons}
+            autoVocab={threeDayBundle?.vocab}
+            autoLessons={threeDayBundle?.lessons}
+            autoArticles={threeDayBundle?.articles}
+            onSelectLesson={(lessonId) => {
+              const foundInDisplayed = displayedLessons.findIndex((l) => l.id === lessonId);
+              if (foundInDisplayed >= 0) {
+                setCurrentDailyIndex(foundInDisplayed);
+              } else {
+                const foundInBase = baseLessons.findIndex((l) => l.id === lessonId);
+                if (foundInBase >= 0) {
+                  setShowOnlyImportedLessons(false);
+                  setSelectedShift('all');
+                  setCurrentDailyIndex(foundInBase);
+                } else {
+                  const target = bookmarkedLessons.find((l) => l.id === lessonId);
+                  if (target) {
+                    handleSaveImportedData([], [target]);
+                    setShowOnlyImportedLessons(false);
+                    setSelectedShift('all');
+                    setCurrentDailyIndex(0);
+                  }
+                }
+              }
+              handleSetActiveTab('daily');
+            }}
+          />
+        )}
+
+        {isMatchGameModalOpen && (
+          <VocabMatchGameModal
+            isOpen={isMatchGameModalOpen}
+            onClose={() => setIsMatchGameModalOpen(false)}
+            vocabPool={FAB_VOCAB}
+            speechSpeed={speechSpeed}
+            onCompletedGame={(_score, _matchCount) => handleGoalCompleted()}
+          />
+        )}
+      </Suspense>
 
       {/* Minimalist Offline Learning Records Sync Prompt Bar */}
       <OfflineSyncPromptBar
@@ -1580,82 +2159,94 @@ export default function App() {
         onOpenCheatSheet={() => setIsCheatSheetOpen(true)}
         onOpenVoiceSettings={() => setIsVoiceSettingsOpen(true)}
         onOpenSearchModal={() => setIsSearchModalOpen(true)}
-      />
-
-      {/* Keyboard Shortcuts Reference Modal */}
-      <KeyboardShortcutsModal
-        isOpen={isShortcutsOpen}
-        onClose={() => setIsShortcutsOpen(false)}
-        onOpenBackupModal={() => setIsBackupModalOpen(true)}
-        onOpenSystemHealth={() => setIsSystemHealthModalOpen(true)}
-      />
-
-      {/* System Backup & Health Diagnostics Modal */}
-      <SystemDataBackupModal
-        isOpen={isBackupModalOpen}
-        onClose={() => setIsBackupModalOpen(false)}
-        streakCount={streakCount}
-        bookmarkedLessons={bookmarkedLessons}
-        visitedLessonIds={visitedLessonIds}
-        readArticleIds={readArticleIds}
-        shiftSettings={shiftSettings}
-        diagnostics={diagnostics}
-        onRestoreData={(restored) => {
-          if (typeof restored.streakCount === 'number') {
-            setStreakCount(restored.streakCount);
-            try { localStorage.setItem('fse_streak', String(restored.streakCount)); } catch (e) {}
-          }
-          if (Array.isArray(restored.bookmarkedLessons)) {
-            setBookmarkedLessons(restored.bookmarkedLessons);
-            try { localStorage.setItem('fse_bookmarks', JSON.stringify(restored.bookmarkedLessons)); } catch (e) {}
-          }
-          if (Array.isArray(restored.visitedLessonIds)) {
-            setVisitedLessonIds(restored.visitedLessonIds);
-            try { localStorage.setItem('fse_visited_lessons', JSON.stringify(restored.visitedLessonIds)); } catch (e) {}
-          }
-          if (Array.isArray(restored.readArticleIds)) {
-            setReadArticleIds(restored.readArticleIds);
-            try { localStorage.setItem('fse_read_articles', JSON.stringify(restored.readArticleIds)); } catch (e) {}
-          }
-          if (restored.shiftSettings) {
-            setShiftSettings(restored.shiftSettings);
-            try { localStorage.setItem('fse_shift_settings', JSON.stringify(restored.shiftSettings)); } catch (e) {}
-          }
-          if (restored.diagnostics) {
-            setDiagnostics(restored.diagnostics);
-            try { localStorage.setItem('fse_user_diagnostics', JSON.stringify(restored.diagnostics)); } catch (e) {}
+        onOpenSpeechPractice={() => setIsSpeechModalOpen(true)}
+        onQuickReplaySentence={() => {
+          if (currentDailyLesson?.english_sentence) {
+            speakEnglish(currentDailyLesson.english_sentence, speechSpeed);
           }
         }}
       />
 
-      {/* Full System Health & Diagnostics Control Center Modal */}
-      <SystemHealthModal
-        isOpen={isSystemHealthModalOpen}
-        onClose={() => setIsSystemHealthModalOpen(false)}
-        onOpenVoiceSettings={() => setIsVoiceSettingsOpen(true)}
-        onOpenScenarioModal={() => setIsCleanroomAmbienceModalOpen(true)}
-        onOpenBackupModal={() => setIsBackupModalOpen(true)}
-        onOpenShortcutsModal={() => setIsShortcutsOpen(true)}
-        cycleNumber={cycleNumber}
-        onRefresh3DayCycle={triggerManualUpdate}
-      />
+      <Suspense fallback={null}>
+        {isShortcutsOpen && (
+          <KeyboardShortcutsModal
+            isOpen={isShortcutsOpen}
+            onClose={() => setIsShortcutsOpen(false)}
+            onOpenBackupModal={() => setIsBackupModalOpen(true)}
+            onOpenSystemHealth={() => setIsSystemHealthModalOpen(true)}
+          />
+        )}
+
+        {isBackupModalOpen && (
+          <SystemDataBackupModal
+            isOpen={isBackupModalOpen}
+            onClose={() => setIsBackupModalOpen(false)}
+            streakCount={streakCount}
+            bookmarkedLessons={bookmarkedLessons}
+            visitedLessonIds={visitedLessonIds}
+            readArticleIds={readArticleIds}
+            shiftSettings={shiftSettings}
+            diagnostics={diagnostics}
+            onRestoreData={(restored) => {
+              if (typeof restored.streakCount === 'number') {
+                setStreakCount(restored.streakCount);
+                try { localStorage.setItem('fse_streak', String(restored.streakCount)); } catch (e) {}
+              }
+              if (Array.isArray(restored.bookmarkedLessons)) {
+                setBookmarkedLessons(restored.bookmarkedLessons);
+                try { localStorage.setItem('fse_bookmarks', JSON.stringify(restored.bookmarkedLessons)); } catch (e) {}
+              }
+              if (Array.isArray(restored.visitedLessonIds)) {
+                setVisitedLessonIds(restored.visitedLessonIds);
+                try { localStorage.setItem('fse_visited_lessons', JSON.stringify(restored.visitedLessonIds)); } catch (e) {}
+              }
+              if (Array.isArray(restored.readArticleIds)) {
+                setReadArticleIds(restored.readArticleIds);
+                try { localStorage.setItem('fse_read_articles', JSON.stringify(restored.readArticleIds)); } catch (e) {}
+              }
+              if (restored.shiftSettings) {
+                setShiftSettings(restored.shiftSettings);
+                try { localStorage.setItem('fse_shift_settings', JSON.stringify(restored.shiftSettings)); } catch (e) {}
+              }
+              if (restored.diagnostics) {
+                setDiagnostics(restored.diagnostics);
+                try { localStorage.setItem('fse_user_diagnostics', JSON.stringify(restored.diagnostics)); } catch (e) {}
+              }
+              queueAutoServerSync(800);
+            }}
+          />
+        )}
+
+        {isSystemHealthModalOpen && (
+          <SystemHealthModal
+            isOpen={isSystemHealthModalOpen}
+            onClose={() => setIsSystemHealthModalOpen(false)}
+            onOpenVoiceSettings={() => setIsVoiceSettingsOpen(true)}
+            onOpenScenarioModal={() => setIsCleanroomAmbienceModalOpen(true)}
+            onOpenBackupModal={() => setIsBackupModalOpen(true)}
+            onOpenShortcutsModal={() => setIsShortcutsOpen(true)}
+            cycleNumber={cycleNumber}
+            onRefresh3DayCycle={triggerManualUpdate}
+          />
+        )}
+      </Suspense>
 
       {/* Geometric Footer - Public Information & InfoSec Compliance Declaration */}
-      <footer className="border-t border-slate-800 bg-slate-950/95 py-2 sm:py-2.5 text-center text-xs text-slate-400 mt-auto md:mt-1 pb-16 md:pb-2.5 relative z-10 w-full max-w-full overflow-hidden">
-        <div className="max-w-6xl mx-auto px-2.5 sm:px-4 flex flex-col sm:flex-row items-center justify-between gap-1.5 sm:gap-3 min-w-0">
+      <footer className="border-t border-slate-800/90 bg-slate-950/95 py-2.5 text-center text-xs text-slate-400 mt-auto pb-18 md:pb-3 relative z-10 w-full max-w-full overflow-hidden">
+        <div className="max-w-6xl mx-auto px-3 sm:px-5 flex flex-col sm:flex-row items-center justify-between gap-2 sm:gap-4 min-w-0">
           <div className="flex items-center gap-2 shrink-0">
-            <Cpu className="w-3.5 h-3.5 text-amber-400" />
-            <span className="font-bold text-slate-200">FSE 晶圓英文</span>
-            <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 font-mono text-[10px] font-black">
-              公開資訊・無資安問題
+            <Cpu className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <span className="font-bold text-slate-200 whitespace-nowrap">FSE Studio</span>
+            <span className="px-2 py-0.5 rounded-md bg-emerald-500/12 border border-emerald-500/35 text-emerald-300 font-mono text-[10px] font-bold whitespace-nowrap">
+              公開資訊 · 去識別合規
             </span>
           </div>
 
-          <p className="text-[11px] sm:text-xs text-emerald-300/95 font-medium leading-snug break-words">
-            資安合規聲明：本網站之所有單字、KK音標、句型、設備教學與導入資料皆經系統去識別化轉換為網際網路可公開通用資訊，絕無任何企業內部機密或資安問題，請安心學習。
+          <p className="text-[11px] text-slate-400 font-medium leading-snug break-words">
+            所有單字、KK音標、句型與設備教學皆屬通用公開資訊，無企業機密或資安疑慮。
           </p>
 
-          <div className="hidden lg:flex items-center gap-2 shrink-0 text-slate-400 font-mono text-[11px]">
+          <div className="hidden lg:flex items-center gap-2 shrink-0 text-slate-500 font-mono text-[11px] whitespace-nowrap">
             <span>S + V + O 國小拆解</span>
           </div>
         </div>

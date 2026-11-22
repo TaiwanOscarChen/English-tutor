@@ -87,8 +87,18 @@ import {
   EqualizerProfileId,
   getPreferredEqualizerProfile,
   setPreferredEqualizerProfile,
-  listenSpeech
+  listenSpeech,
+  cancelSpeech
 } from '../utils/speech';
+import {
+  CALIBRATION_PROMPTS,
+  CALIBRATION_RECORDING_DURATION_MS,
+  CalibrationResult,
+  CalibrationSnapshot,
+  SpeechSpeedCalibrationSession,
+  startSpeechSpeedCalibrationSession,
+  computeWordMatchStats
+} from '../utils/speechSpeedCalibrator';
 import {
   playClickSound,
   playSuccessChime,
@@ -424,6 +434,8 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({
   const [contrastMode, setContrastMode] = useState<ContrastMode>(getStoredContrastMode());
   const previewStopRef = useRef<(() => void) | null>(null);
   const ambientTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const resetSuccessTimerRef = useRef<number | null>(null);
+  const copyTimerRef = useRef<number | null>(null);
 
   // Custom text input lab
   const [customTestInput, setCustomTestInput] = useState<string>('The MFC on Chamber A reached 250 sccm while the FOUP docked at Load Port 1.');
@@ -446,6 +458,30 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({
   // Mic test state for diagnostics
   const [micListening, setMicListening] = useState<boolean>(false);
   const [micTranscript, setMicTranscript] = useState<string | null>(null);
+
+  // Auto Speech Speed Calibration Analyzer state (10s Fab Environment Adaptation)
+  const [calibrationPromptIdx, setCalibrationPromptIdx] = useState<number>(0);
+  const [isCalibrating, setIsCalibrating] = useState<boolean>(false);
+  const [calibrationSnapshot, setCalibrationSnapshot] = useState<CalibrationSnapshot | null>(null);
+  const [calibrationResult, setCalibrationResult] = useState<CalibrationResult | null>(null);
+  const [calibrationNotice, setCalibrationNotice] = useState<string | null>(null);
+  const [calibrationApplied, setCalibrationApplied] = useState<boolean>(false);
+  const [autoOptimizeGlobalParams, setAutoOptimizeGlobalParams] = useState<boolean>(true);
+  const autoOptimizeGlobalParamsRef = useRef<boolean>(true);
+  const calibrationSessionRef = useRef<SpeechSpeedCalibrationSession | null>(null);
+
+  useEffect(() => {
+    autoOptimizeGlobalParamsRef.current = autoOptimizeGlobalParams;
+  }, [autoOptimizeGlobalParams]);
+
+  const stopActiveCalibration = () => {
+    if (calibrationSessionRef.current) {
+      calibrationSessionRef.current.cancel();
+      calibrationSessionRef.current = null;
+    }
+    setIsCalibrating(false);
+    setCalibrationSnapshot(null);
+  };
 
   const refreshState = () => {
     unlockAudioContext();
@@ -534,19 +570,32 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({
     }, pitch);
   };
 
-  const handleLoudnessBoostChange = (mode: LoudnessBoostMode) => {
+  const handleLoudnessBoostChange = (mode: LoudnessBoostMode, targetVol?: number) => {
     playClickSound();
     setLoudnessBoostMode(mode);
     setPreferredLoudnessBoost(mode);
+    if (typeof targetVol === 'number') {
+      setSpeechVolume(targetVol);
+      setPreferredSpeechVolume(targetVol);
+    }
     const msg = mode === 'boost_max'
       ? '超大聲穿透模式已啟動，人聲中高頻共鳴強化。'
       : mode === 'loud'
       ? '高響度模式已啟用。'
       : '標準響度模式已就緒。';
     setTestingText(msg);
-    speakEnglish(mode === 'boost_max' ? 'Max loudness boost engaged for cleanroom clarity.' : 'Speech volume calibrated.', speechSpeed, () => {
-      setTestingText(null);
-    }, pitch);
+    speakEnglish(
+      mode === 'boost_max'
+        ? 'Maximum loudness boost engaged for cleanroom clarity.'
+        : mode === 'loud'
+        ? 'Standard loud volume mode active.'
+        : 'Comfortable headphone volume calibrated.',
+      speechSpeed,
+      () => {
+        setTestingText(null);
+      },
+      pitch
+    );
   };
 
   const handleEqualizerChange = (id: EqualizerProfileId) => {
@@ -555,7 +604,7 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({
     setPreferredEqualizerProfile(id);
     const profile = EQUALIZER_PROFILES.find(p => p.id === id);
     setTestingText(`聲學等化器套用：${profile?.name}`);
-    speakEnglish(`${profile?.name || 'Acoustic equalizer'} profile activated.`, speechSpeed, () => {
+    speakEnglish(`${profile?.subtitle || 'Acoustic equalizer'} profile activated.`, speechSpeed, () => {
       setTestingText(null);
     }, pitch);
   };
@@ -568,6 +617,7 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({
 
   useEffect(() => {
     if (!isOpen) {
+      stopActiveCalibration();
       if (ambientTimerRef.current) {
         clearTimeout(ambientTimerRef.current);
         ambientTimerRef.current = null;
@@ -582,19 +632,36 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({
     refreshState();
     const timer1 = setTimeout(refreshState, 200);
     const timer2 = setTimeout(refreshState, 600);
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleEsc);
     return () => {
+      stopActiveCalibration();
+      window.removeEventListener('keydown', handleEsc);
       clearTimeout(timer1);
       clearTimeout(timer2);
       if (ambientTimerRef.current) {
         clearTimeout(ambientTimerRef.current);
         ambientTimerRef.current = null;
       }
+      if (resetSuccessTimerRef.current !== null) {
+        window.clearTimeout(resetSuccessTimerRef.current);
+        resetSuccessTimerRef.current = null;
+      }
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current);
+        copyTimerRef.current = null;
+      }
       if (previewStopRef.current) {
         previewStopRef.current();
         previewStopRef.current = null;
       }
     };
-  }, [isOpen, selectedVoiceURI, selectedTaiwanVoiceURI]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -722,7 +789,10 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({
     setSelectedVoiceURI(null);
     setSelectedTaiwanVoiceURI(null);
     setResetSuccess(true);
-    setTimeout(() => setResetSuccess(false), 3000);
+    if (resetSuccessTimerRef.current !== null) {
+      window.clearTimeout(resetSuccessTimerRef.current);
+    }
+    resetSuccessTimerRef.current = window.setTimeout(() => setResetSuccess(false), 3000);
 
     refreshState();
     playSuccessChime();
@@ -753,7 +823,7 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({
 
   const handleTestPhrase = (phrase: string, slowRate: boolean = false) => {
     setIsTesting(true);
-    const targetRate = slowRate ? 0.72 : speechSpeed;
+    const targetRate = slowRate ? 0.7 : speechSpeed;
     setTestingText(phrase);
     speakEnglish(phrase, targetRate, () => {
       setIsTesting(false);
@@ -773,7 +843,7 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({
   const handleCustomTest = (slowRate: boolean = false) => {
     if (!customTestInput.trim()) return;
     setIsTesting(true);
-    const targetRate = slowRate ? 0.72 : speechSpeed;
+    const targetRate = slowRate ? 0.7 : speechSpeed;
     setTestingText(customTestInput);
     speakEnglish(customTestInput, targetRate, () => {
       setIsTesting(false);
@@ -783,9 +853,16 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({
 
   const handleCopyTransformedText = (textToCopy: string) => {
     playClickSound();
-    navigator.clipboard.writeText(textToCopy);
-    setCopiedPhonetic(true);
-    setTimeout(() => setCopiedPhonetic(false), 2000);
+    try {
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        navigator.clipboard.writeText(textToCopy).catch(() => {});
+      }
+      setCopiedPhonetic(true);
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+      copyTimerRef.current = window.setTimeout(() => setCopiedPhonetic(false), 2000);
+    } catch {}
   };
 
   const handleStartMicTest = () => {
@@ -806,6 +883,174 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({
       }
     );
   };
+
+  const activeCalibrationPrompt = CALIBRATION_PROMPTS[calibrationPromptIdx] || CALIBRATION_PROMPTS[0];
+
+  const applyOptimizedSynthesisToGlobal = (result: CalibrationResult, speakConfirmation: boolean = false) => {
+    const opt = result.optimizedSynthesisParams;
+    setSpeechSpeed(opt.speechSpeed);
+    setPitch(opt.pitch);
+    setPreferredSpeechPitch(opt.pitch);
+    setSpeechStyle(opt.speechStyle);
+    setPreferredSpeechStyle(opt.speechStyle);
+    setLoudnessBoostMode(opt.loudnessBoost);
+    setPreferredLoudnessBoost(opt.loudnessBoost);
+    setEqualizerProfileState(opt.equalizerProfile);
+    setPreferredEqualizerProfile(opt.equalizerProfile);
+    setCalibrationApplied(true);
+
+    if (speakConfirmation) {
+      setTestingText(
+        `已優化全域語音參數：晶圓廠適配語速 ${opt.speechSpeed.toFixed(2)}x · 音調 ${opt.pitch.toFixed(2)}x`
+      );
+      speakEnglish(
+        `Global fab speech parameters optimized to ${opt.speechSpeed.toFixed(2)} speed.`,
+        opt.speechSpeed,
+        () => {
+          setTestingText(null);
+        },
+        opt.pitch
+      );
+    }
+  };
+
+  const handleStartSpeedCalibration = async (manualTimerOnly: boolean = false) => {
+    unlockAudioContext();
+    cancelSpeech();
+    setTestingText(null);
+    playClickSound();
+    stopActiveCalibration();
+
+    setCalibrationResult(null);
+    setCalibrationNotice(null);
+    setCalibrationApplied(false);
+    setIsCalibrating(true);
+    setCalibrationSnapshot({
+      elapsedMs: 0,
+      maxDurationMs: CALIBRATION_RECORDING_DURATION_MS,
+      remainingMs: CALIBRATION_RECORDING_DURATION_MS,
+      liveWpm: 0,
+      transcript: '',
+      matchedWordCount: 0,
+      totalTargetWords: activeCalibrationPrompt.wordCount,
+      liveMatchAccuracy: 0,
+      inputLevel: 0,
+      ambientNoiseDb: 58,
+      fabEnvironmentTier: 'standard_cleanroom',
+      fabEnvironmentLabel: '標準無塵室',
+      frequencyBars: Array.from({ length: 16 }, () => 12),
+      pauseCount: 0,
+      mode: manualTimerOnly ? 'manual_timer' : 'speech_and_audio',
+    });
+
+    const session = await startSpeechSpeedCalibrationSession({
+      prompt: activeCalibrationPrompt,
+      manualTimerOnly,
+      maxDurationMs: CALIBRATION_RECORDING_DURATION_MS,
+      onSnapshot: (snap) => {
+        setCalibrationSnapshot(snap);
+      },
+      onAutoComplete: (result) => {
+        calibrationSessionRef.current = null;
+        setIsCalibrating(false);
+        setCalibrationSnapshot(null);
+        setCalibrationResult(result);
+        if (autoOptimizeGlobalParamsRef.current) {
+          applyOptimizedSynthesisToGlobal(result, false);
+        }
+        playSuccessChime();
+      },
+      onNotice: (msg) => {
+        setCalibrationNotice(msg);
+      },
+    });
+
+    calibrationSessionRef.current = session;
+  };
+
+  const handleFinishSpeedCalibration = () => {
+    if (!calibrationSessionRef.current) return;
+    playClickSound();
+    const result = calibrationSessionRef.current.stopAndAnalyze();
+    calibrationSessionRef.current = null;
+    setIsCalibrating(false);
+    setCalibrationSnapshot(null);
+    setCalibrationResult(result);
+    if (autoOptimizeGlobalParams) {
+      applyOptimizedSynthesisToGlobal(result, false);
+    }
+    playSuccessChime();
+  };
+
+  const handleCancelSpeedCalibration = () => {
+    playClickSound();
+    stopActiveCalibration();
+  };
+
+  const handleSwitchCalibrationPrompt = () => {
+    if (isCalibrating) return;
+    playClickSound();
+    setCalibrationPromptIdx((prev) => (prev + 1) % CALIBRATION_PROMPTS.length);
+    setCalibrationResult(null);
+    setCalibrationNotice(null);
+    setCalibrationApplied(false);
+  };
+
+  const handlePreviewRecommendedSpeed = () => {
+    if (!calibrationResult) return;
+    playClickSound();
+    const opt = calibrationResult.optimizedSynthesisParams;
+    setTestingText(
+      `試聽晶圓廠適配語速 ${opt.speechSpeed.toFixed(2)}x（音調 ${opt.pitch.toFixed(2)}x）：${activeCalibrationPrompt.text}`
+    );
+    speakEnglish(
+      activeCalibrationPrompt.text,
+      opt.speechSpeed,
+      () => {
+        setTestingText(null);
+      },
+      opt.pitch
+    );
+  };
+
+  const handleApplyCalibratedSpeedToGlobal = () => {
+    if (!calibrationResult) return;
+    playSuccessChime();
+    applyOptimizedSynthesisToGlobal(calibrationResult, true);
+  };
+
+  const getSpeechStyleLabel = (style: SpeechStylePreset): string => {
+    if (style === 'slow_clarity') return '慢速清晰咬字';
+    if (style === 'cleanroom') return '無塵室指令清晰';
+    return '自然流暢對話';
+  };
+
+  const getLoudnessBoostLabel = (mode: LoudnessBoostMode): string => {
+    if (mode === 'boost_max') return '極致增幅 (+12 dB)';
+    if (mode === 'loud') return '高響度 (+6 dB)';
+    return '標準平衡';
+  };
+
+  const getEqualizerShortName = (id: EqualizerProfileId): string => {
+    const found = EQUALIZER_PROFILES.find((p) => p.id === id);
+    return found ? found.name : id;
+  };
+
+  const isOptimizedParamsSynced = Boolean(
+    calibrationResult &&
+      calibrationApplied &&
+      Math.abs(speechSpeed - calibrationResult.optimizedSynthesisParams.speechSpeed) < 0.01 &&
+      Math.abs(pitch - calibrationResult.optimizedSynthesisParams.pitch) < 0.01 &&
+      speechStyle === calibrationResult.optimizedSynthesisParams.speechStyle &&
+      loudnessBoostMode === calibrationResult.optimizedSynthesisParams.loudnessBoost &&
+      equalizerProfile === calibrationResult.optimizedSynthesisParams.equalizerProfile
+  );
+
+  const calibrationWordMatches = calibrationSnapshot?.transcript
+    ? computeWordMatchStats(calibrationSnapshot.transcript, activeCalibrationPrompt.text).matchedIndices
+    : calibrationResult?.transcript
+    ? computeWordMatchStats(calibrationResult.transcript, activeCalibrationPrompt.text).matchedIndices
+    : new Set<number>();
 
   // Filtered voice list
   const filteredVoices = englishVoices.filter((v) => {
@@ -843,46 +1088,55 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/85 backdrop-blur-md overflow-y-auto">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="語音發音與音訊深度調校中心"
+        onClick={onClose}
+        className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/85 backdrop-blur-md overflow-y-auto"
+      >
         <motion.div
           initial={{ opacity: 0, scale: 0.95, y: 15 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95, y: 15 }}
-          className="bg-slate-900 border border-slate-700 w-full max-w-3xl rounded-3xl shadow-2xl overflow-hidden text-slate-100 flex flex-col max-h-[92vh] relative"
+          onClick={(e) => e.stopPropagation()}
+          className="bg-slate-900 border border-slate-700 w-full max-w-3xl rounded-2xl sm:rounded-3xl shadow-2xl overflow-hidden text-slate-100 flex flex-col max-h-[94dvh] sm:max-h-[92vh] relative"
         >
           {/* Header */}
-          <div className="p-4 sm:p-5 bg-slate-950/95 border-b border-slate-800 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-2xl bg-amber-500/20 text-amber-400 border border-amber-500/30 shrink-0">
+          <div className="p-3.5 sm:p-5 bg-slate-950/95 border-b border-slate-800 flex items-start sm:items-center justify-between gap-2">
+            <div className="flex items-start sm:items-center gap-2.5 sm:gap-3 min-w-0">
+              <div className="p-2 sm:p-2.5 rounded-2xl bg-amber-500/20 text-amber-400 border border-amber-500/30 shrink-0">
                 <Volume2 className="w-5 h-5" />
               </div>
-              <div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <h3 className="text-base sm:text-lg font-black text-slate-100">
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                  <h3 className="text-sm sm:text-lg font-black text-slate-100 leading-snug">
                     語音發音與音訊深度調校中心
                   </h3>
-                  <span className="text-[10px] bg-amber-400/20 text-amber-300 font-mono px-2 py-0.5 rounded-full border border-amber-400/30 font-bold">
+                  <span className="text-[10px] bg-amber-400/20 text-amber-300 font-mono px-2 py-0.5 rounded-md border border-amber-400/30 font-bold">
                     🇹🇼 台灣在地口音支援
                   </span>
                 </div>
-                <p className="text-xs text-slate-400 mt-0.5">
+                <p className="text-[11px] sm:text-xs text-slate-400 mt-0.5 leading-snug">
                   調校台灣晶圓廠在地口音、美式真人聲線、DSP 等化器、術語發音透視與雙語導讀
                 </p>
               </div>
             </div>
             <button
+              type="button"
+              aria-label="關閉語音發音調校中心"
               onClick={() => {
                 playClickSound();
                 onClose();
               }}
-              className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+              className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
 
           {/* Navigation Sub-tabs */}
-          <div className="flex border-b border-slate-800 bg-slate-950/70 p-2 gap-1.5 shrink-0 overflow-x-auto no-scrollbar">
+          <div role="tablist" aria-label="語音調校功能分頁" className="flex border-b border-slate-800 bg-slate-950/70 p-2 gap-1.5 shrink-0 overflow-x-auto no-scrollbar">
             {[
               { id: 'voice', label: '聲線與聲音選擇', icon: Sliders },
               { id: 'accent', label: '台灣口音調校', icon: Languages },
@@ -896,11 +1150,17 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({
               return (
                 <button
                   key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={isCur}
                   onClick={() => {
                     playClickSound();
+                    if (tab.id !== 'voice' && isCalibrating) {
+                      stopActiveCalibration();
+                    }
                     setActiveTab(tab.id as any);
                   }}
-                  className={`flex-1 min-w-[115px] py-2 px-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap border ${
+                  className={`flex-1 min-w-[115px] py-2 px-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap border focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${
                     isCur
                       ? 'bg-amber-400 text-slate-950 border-amber-400 shadow-md font-black'
                       : 'bg-slate-900/80 text-slate-400 hover:bg-slate-800 hover:text-white border-slate-800'
@@ -924,22 +1184,19 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({
                 className="p-3 bg-gradient-to-r from-cyan-950/90 via-slate-900 to-indigo-950/90 border border-cyan-500/50 rounded-2xl flex items-center justify-between gap-3 text-cyan-200 text-xs shadow-lg shadow-cyan-950/30"
               >
                 <div className="flex items-center gap-2.5 flex-1 min-w-0">
-                  <div className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping shrink-0" />
+                  <Volume2 className="w-4 h-4 text-cyan-400 shrink-0" />
                   <div className="truncate">
                     <span className="font-bold text-cyan-300">正在播放發音測試：</span>
                     <span className="font-mono ml-1 text-slate-100">"{testingText}"</span>
                   </div>
                 </div>
-                {/* Animated Spectrum Waveform Bars */}
-                <div className="flex items-center gap-0.5 shrink-0 px-2 py-1 bg-slate-950/70 rounded-lg border border-cyan-500/30">
+                <div className="flex items-center gap-0.5 shrink-0 px-2 py-1 bg-slate-950/70 rounded-lg border border-cyan-500/30 h-6">
                   {[40, 75, 100, 60, 90, 50, 85].map((height, i) => (
                     <div
                       key={i}
-                      className="w-1 bg-cyan-400 rounded-full animate-pulse"
+                      className="w-1 bg-cyan-400 rounded-sm"
                       style={{
                         height: `${height}%`,
-                        animationDuration: `${0.3 + (i % 3) * 0.15}s`,
-                        animationDelay: `${i * 0.05}s`
                       }}
                     />
                   ))}
@@ -948,24 +1205,24 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({
             )}
 
             {/* Quick Engine Status Bar */}
-            <div className="bg-slate-950/80 p-3.5 rounded-2xl border border-slate-800 flex items-center justify-between gap-3 flex-wrap">
-              <div className="space-y-0.5">
-                <div className="flex items-center gap-2 text-xs font-bold text-slate-300">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                  <span>音訊架構：{diagnostics?.isWebSpeechSupported ? 'Web Speech 雙通道頂級引擎' : '雲端串流備援引擎'}</span>
+            <div className="bg-slate-950/80 p-3 sm:p-3.5 rounded-2xl border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+              <div className="space-y-1 min-w-0">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-slate-300 flex-wrap">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  <span>音訊架構：{diagnostics?.isWebSpeechSupported ? 'Cloud HD + Web Speech 雙引擎' : '雲端高音質串流引擎'}</span>
                   <span className="text-[10px] text-amber-300 font-mono font-bold">
                     [口音：{ACCENT_OPTIONS.find(o => o.id === accentMode)?.name || '台灣晶圓廠在地口音'}]
                   </span>
                 </div>
-                <div className="text-[11px] text-slate-400 font-mono truncate max-w-sm sm:max-w-md">
+                <div className="text-[11px] text-slate-400 font-mono break-words leading-relaxed">
                   英語聲線：{activeVoiceName || '系統預設美語'} ｜ 國語聲線：{activeTaiwanVoiceName || '系統預設繁中'}
                 </div>
               </div>
               <button
                 onClick={handleResetEngine}
-                className="px-3.5 py-2 rounded-xl bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 border border-indigo-500/40 text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shrink-0 shadow-sm active:scale-95"
+                className="w-full sm:w-auto px-3.5 py-2 rounded-xl bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 border border-indigo-500/40 text-xs font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer shrink-0 shadow-sm active:scale-95"
               >
-                <RotateCcw className={`w-3.5 h-3.5 ${resetSuccess ? 'animate-spin' : ''}`} />
+                <RotateCcw className="w-3.5 h-3.5" />
                 <span>{resetSuccess ? '重置完成' : '一鍵重置語音引擎'}</span>
               </button>
             </div>
@@ -983,7 +1240,7 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({
                       <div>
                         <div className="text-slate-100 font-black text-xs flex items-center gap-1.5">
                           <span>口音風格與在地化調校模式</span>
-                          <span className="text-[10px] px-2 py-0.2 rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/30 font-mono font-bold">
+                          <span className="text-[10px] px-2 py-0.5 rounded-md bg-amber-400/20 text-amber-300 border border-amber-400/30 font-mono font-bold">
                             Taiwan Accent Engine
                           </span>
                         </div>
@@ -1012,7 +1269,7 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({
                           <div>
                             <div className="flex items-center justify-between mb-1">
                               <span className="text-xs font-black">{opt.name}</span>
-                              <span className={`text-[9px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                              <span className={`text-[9px] px-1.5 py-0.5 rounded-md font-mono font-bold ${
                                 isCur ? 'bg-slate-950 text-amber-300' : 'bg-slate-800 text-slate-400'
                               }`}>
                                 {opt.badge}
@@ -1038,7 +1295,7 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({
                       <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
                       台灣國語在地聲線自選 (Taiwan Chinese Voices)
                     </span>
-                    <span className="text-[11px] text-slate-400">已偵測 {twVoices.length} 組台灣國語聲線</span>
+                    <span className="text-[11px] text-slate-400 tabular-nums">已偵測 {twVoices.length} 組台灣國語聲線</span>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -1119,7 +1376,7 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({
                             <span className="text-xs font-black text-amber-300 group-hover:text-amber-200">
                               {item.term}
                             </span>
-                            <span className="text-[9px] px-1.5 py-0.2 rounded font-mono bg-slate-900 text-emerald-400 border border-slate-800">
+                            <span className="text-[9px] px-1.5 py-0.5 rounded font-mono bg-slate-900 text-emerald-400 border border-slate-800">
                               {item.tag}
                             </span>
                           </div>
@@ -1178,7 +1435,7 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({
                       <div>
                         <div className="text-slate-100 font-black text-xs flex items-center gap-1.5">
                           <span>語音發音音量與穿透力增強</span>
-                          <span className="text-[10px] px-2 py-0.2 rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/30 font-mono font-bold">
+                          <span className="text-[10px] px-2 py-0.5 rounded-md bg-amber-400/20 text-amber-300 border border-amber-400/30 font-mono font-bold">
                             Loudness Booster
                           </span>
                         </div>
@@ -1226,8 +1483,7 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({
                           key={mode.id}
                           type="button"
                           onClick={() => {
-                            handleLoudnessBoostChange(mode.id as LoudnessBoostMode);
-                            handleVolumeChange(mode.vol);
+                            handleLoudnessBoostChange(mode.id as LoudnessBoostMode, mode.vol);
                           }}
                           className={`p-2.5 rounded-xl text-left border transition-all cursor-pointer relative flex flex-col justify-between ${
                             isCur
@@ -1238,7 +1494,7 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({
                           <div>
                             <div className="flex items-center justify-between mb-1">
                               <span className="text-xs font-black">{mode.label}</span>
-                              <span className={`text-[9px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                              <span className={`text-[9px] px-1.5 py-0.5 rounded-md font-mono font-bold ${
                                 isCur ? 'bg-slate-950 text-amber-300' : 'bg-slate-800 text-slate-400'
                               }`}>
                                 {mode.badge}
@@ -1257,21 +1513,21 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({
                   </div>
 
                   {/* Volume Slider & Quick Volume Steppers */}
-                  <div className="pt-2 border-t border-slate-800/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5 w-full sm:w-auto">
+                  <div className="pt-2 border-t border-slate-800/80 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 w-full sm:w-auto">
                       <span className="text-[11px] font-bold text-slate-400 shrink-0">快捷音量階級：</span>
-                      <div className="grid grid-cols-4 gap-1.5 flex-1 sm:flex-initial">
+                      <div className="grid grid-cols-4 gap-1.5 w-full sm:w-auto">
                         {[
                           { val: 0.6, label: '60%' },
                           { val: 0.8, label: '80%' },
                           { val: 0.9, label: '90%' },
-                          { val: 1.0, label: '100% 滿載' },
+                          { val: 1.0, label: '100%滿載' },
                         ].map((v) => (
                           <button
                             key={v.val}
                             type="button"
                             onClick={() => handleVolumeChange(v.val)}
-                            className={`py-1 px-2 rounded-lg text-[11px] font-bold border transition-all text-center cursor-pointer ${
+                            className={`py-1.5 px-1.5 rounded-lg text-[11px] font-bold border transition-all text-center cursor-pointer whitespace-nowrap ${
                               Math.abs(speechVolume - v.val) < 0.04
                                 ? 'bg-amber-400 text-slate-950 border-amber-300 font-black shadow-sm'
                                 : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800'
@@ -1388,7 +1644,7 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({
                       發音模式與情境風格 (Speech Style)
                     </span>
                   </div>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                     {[
                       { id: 'cleanroom', label: '🎯 晶圓無塵室實戰', desc: '強調術語重音與字字清晰' },
                       { id: 'natural', label: '🎙️ 母語自然流暢', desc: '美語連音與自然語調' },
@@ -1422,36 +1678,41 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({
                         <Sliders className="w-3.5 h-3.5 text-amber-400" />
                         語速微調 (Speech Rate)
                       </span>
-                      <span className="font-mono text-amber-400 bg-amber-950/60 px-2.5 py-0.5 rounded-lg border border-amber-500/30 font-bold">
+                      <span className="font-mono text-amber-400 bg-amber-950/60 px-2.5 py-0.5 rounded-lg border border-amber-500/30 font-bold tabular-nums">
                         {speechSpeed.toFixed(2)}x
                       </span>
                     </div>
                     <div className="grid grid-cols-2 gap-1.5">
                       {[
-                        { rate: 0.75, label: '0.75x 慢速精聽' },
+                        { rate: 0.7, label: '0.7x 慢速精聽' },
                         { rate: 0.88, label: '0.88x 標準教學' },
                         { rate: 1.0, label: '1.0x 原速日常' },
                         { rate: 1.15, label: '1.15x 快速實戰' },
-                      ].map((s) => (
-                        <button
-                          key={s.rate}
-                          onClick={() => {
-                            playClickSound();
-                            setSpeechSpeed(s.rate);
-                            setTestingText(`Speech rate set to ${s.rate}x`);
-                            speakEnglish(`Speech rate set to ${s.rate}x`, s.rate, () => {
-                              setTestingText(null);
-                            }, pitch);
-                          }}
-                          className={`py-1.5 px-1 rounded-xl text-xs font-bold border transition-all text-center cursor-pointer ${
-                            Math.abs(speechSpeed - s.rate) < 0.03
-                              ? 'bg-amber-400 text-slate-950 border-amber-300 shadow-md font-black'
-                              : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800'
-                          }`}
-                        >
-                          {s.label}
-                        </button>
-                      ))}
+                      ].map((s) => {
+                        const isSelected = Math.abs(speechSpeed - s.rate) < 0.03;
+                        return (
+                          <button
+                            key={s.rate}
+                            type="button"
+                            aria-pressed={isSelected}
+                            onClick={() => {
+                              playClickSound();
+                              setSpeechSpeed(s.rate);
+                              setTestingText(`Speech rate set to ${s.rate}x`);
+                              speakEnglish(`Speech rate set to ${s.rate}x`, s.rate, () => {
+                                setTestingText(null);
+                              }, pitch);
+                            }}
+                            className={`py-1.5 px-1 rounded-xl text-xs font-bold border transition-all text-center cursor-pointer tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${
+                              isSelected
+                                ? 'bg-amber-400 text-slate-950 border-amber-300 shadow-md font-black'
+                                : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800'
+                            }`}
+                          >
+                            {s.label}
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
 
@@ -1487,6 +1748,376 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({
                     </div>
                   </div>
                 </div>
+
+                {/* 🎯 Auto Speech Speed Calibration Analyzer (自動語速校正分析儀 · 10 秒晶圓廠環境適配) */}
+                <div className="p-3.5 sm:p-4 bg-gradient-to-br from-cyan-950/50 via-slate-950/95 to-emerald-950/35 rounded-2xl border border-cyan-500/45 space-y-3 shadow-lg shadow-cyan-950/25">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex items-start sm:items-center gap-2.5 min-w-0">
+                      <div className="p-2 rounded-xl bg-cyan-400/20 text-cyan-300 border border-cyan-400/40 shrink-0">
+                        <Gauge className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-slate-100 font-black text-xs flex items-center gap-2 flex-wrap">
+                          <span>自動語速校正分析儀</span>
+                          <span className="px-1.5 py-0.5 rounded-md bg-cyan-500/20 border border-cyan-400/35 text-[10px] font-mono font-bold text-cyan-200">
+                            10s 晶圓廠適配
+                          </span>
+                          <span className="text-[10px] font-mono text-emerald-300/90 font-bold tabular-nums">
+                            目前全域 {speechSpeed.toFixed(2)}x
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-400 leading-snug mt-0.5">
+                          錄製 10 秒朗讀並即時比對目標語句與無塵室底噪，自動算出「晶圓廠環境適配語速」並直接優化全域合成參數
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={isCalibrating}
+                      onClick={handleSwitchCalibrationPrompt}
+                      className="self-start sm:self-center px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700 text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-45 shrink-0"
+                    >
+                      <RefreshCw className="w-3 h-3 text-cyan-400" />
+                      <span>更換目標句</span>
+                    </button>
+                  </div>
+
+                  {/* Auto-Optimize Global Parameters Toggle */}
+                  <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-slate-900/75 border border-slate-800">
+                    <div className="flex items-center gap-2 text-[11px] text-slate-300 font-bold min-w-0">
+                      <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span className="truncate">10 秒分析完成後自動直接優化全域語音合成參數（語速／音調／響度／EQ）</span>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={autoOptimizeGlobalParams}
+                      onClick={() => {
+                        playClickSound();
+                        setAutoOptimizeGlobalParams((prev) => !prev);
+                      }}
+                      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border transition-colors cursor-pointer ${
+                        autoOptimizeGlobalParams
+                          ? 'bg-emerald-500 border-emerald-300'
+                          : 'bg-slate-800 border-slate-600'
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform ${
+                          autoOptimizeGlobalParams ? 'translate-x-4' : 'translate-x-0.5'
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  {/* Target Reading Prompt Card */}
+                  <div className="p-3 rounded-xl bg-slate-900/90 border border-slate-800 space-y-1.5">
+                    <div className="flex items-center justify-between text-[10px] text-slate-400 font-bold gap-2 flex-wrap">
+                      <span>比對目標語句 · {activeCalibrationPrompt.label}</span>
+                      <span className="font-mono tabular-nums text-cyan-300/80">
+                        {activeCalibrationPrompt.wordCount} 詞 · {activeCalibrationPrompt.syllableCount} 音節 · 建議 10 秒內自然朗讀
+                      </span>
+                    </div>
+                    <p className="text-sm font-mono font-bold text-slate-100 leading-relaxed flex flex-wrap gap-x-1.5 gap-y-0.5">
+                      {activeCalibrationPrompt.text.split(' ').map((word, idx) => {
+                        const isMatched = calibrationWordMatches.has(idx);
+                        return (
+                          <span
+                            key={idx}
+                            className={`transition-colors duration-150 ${
+                              isMatched
+                                ? 'text-emerald-300 underline decoration-emerald-400/70 underline-offset-4'
+                                : 'text-slate-100'
+                            }`}
+                          >
+                            {word}
+                          </span>
+                        );
+                      })}
+                    </p>
+                    <p className="text-[11px] text-slate-400">{activeCalibrationPrompt.translation}</p>
+                  </div>
+
+                  {/* Notice Banner if microphone or speech recognition unavailable */}
+                  {calibrationNotice && (
+                    <div className="px-3 py-2 rounded-xl bg-amber-950/50 border border-amber-500/40 text-[11px] text-amber-200 flex items-start gap-2">
+                      <Info className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                      <span>{calibrationNotice}</span>
+                    </div>
+                  )}
+
+                  {/* Active 10-Second Recording & Acoustic Analysis Panel */}
+                  {isCalibrating && calibrationSnapshot ? (
+                    <div className="p-3 rounded-xl bg-slate-950/95 border border-cyan-400/55 space-y-3">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <div className="flex items-center gap-2 text-xs font-black text-cyan-300">
+                          <Mic className="w-4 h-4 text-rose-400 animate-pulse" />
+                          <span>
+                            {calibrationSnapshot.mode === 'manual_timer'
+                              ? '10 秒計時朗讀中，讀完可提前按分析'
+                              : '10 秒朗讀錄音與目標句即時比對中...'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 font-mono text-xs tabular-nums">
+                          <span className="px-2 py-0.5 rounded-md bg-rose-500/20 border border-rose-400/40 text-rose-200 font-black">
+                            倒數 {(calibrationSnapshot.remainingMs / 1000).toFixed(1)}s
+                          </span>
+                          {calibrationSnapshot.liveWpm > 0 && (
+                            <span className="text-emerald-300 font-black">
+                              {calibrationSnapshot.liveWpm} WPM
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* 10-Second Countdown Progress Bar */}
+                      <div className="space-y-1">
+                        <div className="h-2 w-full rounded-full bg-slate-800 overflow-hidden border border-slate-700/80">
+                          <div
+                            className="h-full bg-gradient-to-r from-cyan-400 via-emerald-400 to-amber-400 transition-all duration-100"
+                            style={{
+                              width: `${Math.min(
+                                100,
+                                Math.max(0, (calibrationSnapshot.elapsedMs / Math.max(1, calibrationSnapshot.maxDurationMs)) * 100)
+                              )}%`,
+                            }}
+                          />
+                        </div>
+                        <div className="flex items-center justify-between text-[10px] font-mono text-slate-400 tabular-nums">
+                          <span>已錄 {(calibrationSnapshot.elapsedMs / 1000).toFixed(1)}s / 10.0s</span>
+                          <span className="flex items-center gap-2">
+                            <span className="text-cyan-300">
+                              目標比對 {calibrationSnapshot.liveMatchAccuracy}%
+                            </span>
+                            <span className="text-amber-300">
+                              底噪 {calibrationSnapshot.ambientNoiseDb} dB · {calibrationSnapshot.fabEnvironmentLabel}
+                            </span>
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* 16-Bar Live Microphone Level Meter */}
+                      <div className="h-10 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 flex items-end justify-between gap-1">
+                        {calibrationSnapshot.frequencyBars.map((barHeight, i) => (
+                          <div
+                            key={i}
+                            className="flex-1 rounded-sm bg-gradient-to-t from-cyan-500 to-emerald-300 transition-all duration-75"
+                            style={{ height: `${Math.max(12, barHeight)}%` }}
+                          />
+                        ))}
+                      </div>
+
+                      {/* Live Transcript Preview */}
+                      {calibrationSnapshot.transcript && (
+                        <div className="px-2.5 py-1.5 rounded-lg bg-slate-900/80 border border-slate-800 text-[11px] font-mono text-cyan-200 leading-relaxed">
+                          <span className="text-slate-500 mr-1.5">即時辨識：</span>
+                          <span>{calibrationSnapshot.transcript}</span>
+                        </div>
+                      )}
+
+                      <div className="flex items-center justify-between gap-2 flex-wrap pt-0.5">
+                        <span className="text-[11px] text-slate-400 tabular-nums">
+                          {calibrationSnapshot.mode === 'manual_timer'
+                            ? '時間到自動結算，或讀完立即點擊「提前分析」'
+                            : `命中 ${calibrationSnapshot.matchedWordCount}/${calibrationSnapshot.totalTargetWords} 詞 · 停頓 ${calibrationSnapshot.pauseCount} 次`}
+                        </span>
+                        <div className="flex items-center gap-2 ml-auto">
+                          <button
+                            type="button"
+                            onClick={handleCancelSpeedCalibration}
+                            className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold border border-slate-700 cursor-pointer transition-all"
+                          >
+                            取消
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleFinishSpeedCalibration}
+                            className="px-3.5 py-1.5 rounded-xl bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-black text-xs flex items-center gap-1.5 cursor-pointer shadow-md active:scale-95 transition-all"
+                          >
+                            <Square className="w-3 h-3 fill-current" />
+                            <span>提前完成並分析</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    /* Idle Controls */
+                    !calibrationResult && (
+                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleStartSpeedCalibration(false)}
+                          className="flex-1 py-2.5 px-4 rounded-xl bg-gradient-to-r from-cyan-400 to-emerald-400 hover:brightness-110 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-md shadow-cyan-950/40 cursor-pointer active:scale-[0.99] transition-all"
+                        >
+                          <Mic className="w-4 h-4" />
+                          <span>錄製 10 秒朗讀並校正分析</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleStartSpeedCalibration(true)}
+                          className="py-2.5 px-3.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all shrink-0"
+                        >
+                          <Activity className="w-3.5 h-3.5 text-amber-400" />
+                          <span>無麥克風 10 秒計時</span>
+                        </button>
+                      </div>
+                    )
+                  )}
+
+                  {/* Calibration Analysis Result & Global Synthesis Parameter Optimization */}
+                  {calibrationResult && !isCalibrating && (
+                    <div className="p-3.5 rounded-xl bg-slate-950/95 border border-emerald-500/45 space-y-3">
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+                        <div className="p-2.5 rounded-xl bg-amber-950/45 border border-amber-400/55">
+                          <div className="text-[10px] text-amber-200 font-bold">晶圓廠適配語速</div>
+                          <div className="text-base font-black font-mono text-amber-300 tabular-nums mt-0.5">
+                            {calibrationResult.fabAdaptedSpeed.toFixed(2)}x
+                          </div>
+                          <div className="text-[10px] text-amber-300/90 font-mono tabular-nums truncate">
+                            {calibrationResult.fabSpeedAdjustment < 0
+                              ? `噪音補償 ${calibrationResult.fabSpeedAdjustment.toFixed(2)}x`
+                              : `基準 ${calibrationResult.recommendedSpeed.toFixed(2)}x`}
+                          </div>
+                        </div>
+
+                        <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
+                          <div className="text-[10px] text-slate-400 font-bold">實測朗讀語速</div>
+                          <div className="text-base font-black font-mono text-cyan-300 tabular-nums mt-0.5">
+                            {calibrationResult.measuredWpm} <span className="text-[10px] font-bold">WPM</span>
+                          </div>
+                          <div className="text-[10px] text-slate-500 font-mono tabular-nums">
+                            {calibrationResult.syllablesPerSec} 音節/秒
+                          </div>
+                        </div>
+
+                        <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
+                          <div className="text-[10px] text-slate-400 font-bold">語句比對／流暢</div>
+                          <div className="text-base font-black font-mono text-emerald-300 tabular-nums mt-0.5">
+                            {calibrationResult.wordAccuracy}%
+                          </div>
+                          <div className="text-[10px] text-emerald-400/90 font-mono tabular-nums">
+                            流暢度 {calibrationResult.fluencyScore} 分
+                          </div>
+                        </div>
+
+                        <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
+                          <div className="text-[10px] text-slate-400 font-bold">偵測環境聲學</div>
+                          <div className="text-base font-black font-mono text-indigo-300 tabular-nums mt-0.5">
+                            {calibrationResult.ambientNoiseDb} <span className="text-[10px] font-bold">dB</span>
+                          </div>
+                          <div className="text-[10px] text-indigo-300/90 font-bold truncate">
+                            {calibrationResult.fabEnvironmentTier === 'noisy_fab_bay'
+                              ? '高噪機台區'
+                              : calibrationResult.fabEnvironmentTier === 'standard_cleanroom'
+                              ? '標準無塵室'
+                              : '靜音辦公區'}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Optimized Global TTS Synthesis Parameter Matrix */}
+                      <div className="p-2.5 rounded-xl bg-slate-900/90 border border-cyan-500/30 space-y-2">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <div className="text-[11px] font-black text-cyan-200 flex items-center gap-1.5">
+                            <SlidersHorizontal className="w-3.5 h-3.5 text-cyan-400" />
+                            <span>全域語音合成最佳化參數</span>
+                          </div>
+                          {isOptimizedParamsSynced && (
+                            <span className="text-[10px] font-bold text-emerald-300 flex items-center gap-1">
+                              <CheckCircle2 className="w-3 h-3" />
+                              <span>已即時寫入全域合成引擎</span>
+                            </span>
+                          )}
+                        </div>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-[10px]">
+                          <div className="px-2 py-1.5 rounded-lg bg-slate-950/90 border border-slate-800">
+                            <div className="text-slate-500">合成語速</div>
+                            <div className="font-mono font-black text-amber-300 tabular-nums">
+                              {calibrationResult.optimizedSynthesisParams.speechSpeed.toFixed(2)}x
+                            </div>
+                          </div>
+                          <div className="px-2 py-1.5 rounded-lg bg-slate-950/90 border border-slate-800">
+                            <div className="text-slate-500">人聲音調</div>
+                            <div className="font-mono font-black text-cyan-300 tabular-nums">
+                              {calibrationResult.optimizedSynthesisParams.pitch.toFixed(2)}x
+                            </div>
+                          </div>
+                          <div className="px-2 py-1.5 rounded-lg bg-slate-950/90 border border-slate-800">
+                            <div className="text-slate-500">響度增幅</div>
+                            <div className="font-bold text-emerald-300 truncate">
+                              {getLoudnessBoostLabel(calibrationResult.optimizedSynthesisParams.loudnessBoost)}
+                            </div>
+                          </div>
+                          <div className="px-2 py-1.5 rounded-lg bg-slate-950/90 border border-slate-800">
+                            <div className="text-slate-500">聲學 EQ／風格</div>
+                            <div className="font-bold text-indigo-300 truncate">
+                              {getEqualizerShortName(calibrationResult.optimizedSynthesisParams.equalizerProfile)}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="text-[10px] text-slate-400 flex items-center justify-between gap-2 flex-wrap">
+                          <span>
+                            語氣風格：{getSpeechStyleLabel(calibrationResult.optimizedSynthesisParams.speechStyle)}
+                          </span>
+                          <span className="font-mono tabular-nums">
+                            錄製 {calibrationResult.recordedDurationSec}s · 發聲 {calibrationResult.speakingDurationSec}s · 停頓 {calibrationResult.pauseCount} 次
+                          </span>
+                        </div>
+                      </div>
+
+                      <p className="text-xs text-slate-300 leading-relaxed">
+                        {calibrationResult.optimizedSynthesisParams.rationale}
+                      </p>
+
+                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-0.5">
+                        <button
+                          type="button"
+                          onClick={handleApplyCalibratedSpeedToGlobal}
+                          className={`flex-1 py-2.5 px-4 rounded-xl font-black text-xs flex items-center justify-center gap-1.5 shadow-md cursor-pointer active:scale-[0.99] transition-all tabular-nums ${
+                            isOptimizedParamsSynced
+                              ? 'bg-emerald-500 text-slate-950 border border-emerald-300'
+                              : 'bg-amber-400 hover:bg-amber-300 text-slate-950'
+                          }`}
+                        >
+                          {isOptimizedParamsSynced ? (
+                            <>
+                              <CheckCircle2 className="w-4 h-4" />
+                              <span>
+                                已優化全域參數（{calibrationResult.fabAdaptedSpeed.toFixed(2)}x）
+                              </span>
+                            </>
+                          ) : (
+                            <>
+                              <Zap className="w-4 h-4 fill-current" />
+                              <span>
+                                套用並優化全域語音參數（{calibrationResult.fabAdaptedSpeed.toFixed(2)}x）
+                              </span>
+                            </>
+                          )}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={handlePreviewRecommendedSpeed}
+                          className="py-2.5 px-3.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-cyan-500/40 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all shrink-0 tabular-nums"
+                        >
+                          <Play className="w-3.5 h-3.5 fill-current" />
+                          <span>試聽優化語音</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleStartSpeedCalibration(false)}
+                          className="py-2.5 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 font-bold text-xs flex items-center justify-center gap-1 cursor-pointer transition-all shrink-0"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                          <span>再錄 10 秒</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
@@ -1502,7 +2133,7 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({
                       <div>
                         <div className="text-slate-100 font-black text-xs flex items-center gap-1.5">
                           <span>聲學等化器 DSP 與頻譜響應 (Acoustic Equalizer)</span>
-                          <span className="text-[10px] px-2 py-0.2 rounded-full bg-cyan-400/20 text-cyan-300 border border-cyan-400/30 font-mono font-bold">
+                          <span className="text-[10px] px-2 py-0.5 rounded-md bg-cyan-400/20 text-cyan-300 border border-cyan-400/30 font-mono font-bold">
                             5-Band DSP Active
                           </span>
                         </div>
@@ -1520,8 +2151,17 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({
                       return (
                         <div
                           key={prof.id}
+                          role="button"
+                          tabIndex={0}
+                          aria-pressed={isSelected}
                           onClick={() => handleEqualizerChange(prof.id)}
-                          className={`p-3 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between ${
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              handleEqualizerChange(prof.id);
+                            }
+                          }}
+                          className={`p-3 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
                             isSelected
                               ? 'bg-cyan-950/70 border-cyan-400 shadow-md ring-1 ring-cyan-400/80'
                               : 'bg-slate-900/80 border-slate-800 hover:bg-slate-850 hover:border-slate-750'
@@ -1552,11 +2192,11 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({
                 </div>
 
                 {/* 5-Band Graphic Equalizer Frequency Bands Visualizer */}
-                <div className="p-4 bg-slate-950/80 rounded-2xl border border-slate-800 space-y-3">
-                  <div className="flex items-center justify-between">
+                <div className="p-3 sm:p-4 bg-slate-950/80 rounded-2xl border border-slate-800 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                     <span className="text-xs font-black text-slate-200 flex items-center gap-1.5">
-                      <Activity className="w-3.5 h-3.5 text-cyan-400" />
-                      5 頻段聲學濾波器響應圖 (5-Band Frequency Response)
+                      <Activity className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                      <span>5 頻段聲學濾波器響應圖 (5-Band Response)</span>
                     </span>
                     <button
                       onClick={() => {
@@ -1567,33 +2207,33 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({
                           setTestingText(null);
                         }, pitch);
                       }}
-                      className="px-3 py-1 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-black text-xs flex items-center gap-1.5 cursor-pointer shadow-sm active:scale-95"
+                      className="w-full sm:w-auto px-3 py-1.5 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-sm active:scale-95"
                     >
                       <Play className="w-3 h-3 fill-current" />
                       <span>試聽當前等化器效果</span>
                     </button>
                   </div>
 
-                  <div className="grid grid-cols-5 gap-2 pt-2 pb-1">
+                  <div className="grid grid-cols-5 gap-1 sm:gap-2 pt-2 pb-1">
                     {[
-                      { band: '80 Hz', desc: '超低頻濾除', val: currentEqualizerData.bands.hz80, color: 'from-blue-500 to-indigo-500' },
-                      { band: '300 Hz', desc: '風機嗡鳴抑制', val: currentEqualizerData.bands.hz300, color: 'from-cyan-500 to-blue-500' },
-                      { band: '1.0 kHz', desc: '母音飽滿度', val: currentEqualizerData.bands.hz1k, color: 'from-emerald-500 to-teal-500' },
-                      { band: '3.5 kHz', desc: '子音爆破穿透', val: currentEqualizerData.bands.hz3k5, color: 'from-amber-400 to-orange-500' },
-                      { band: '8.0 kHz', desc: '高頻空氣感', val: currentEqualizerData.bands.hz8k, color: 'from-purple-400 to-pink-500' },
+                      { band: '80Hz', desc: '超低濾除', val: currentEqualizerData.bands.hz80, color: 'from-blue-500 to-indigo-500' },
+                      { band: '300Hz', desc: '嗡鳴抑制', val: currentEqualizerData.bands.hz300, color: 'from-cyan-500 to-blue-500' },
+                      { band: '1kHz', desc: '母音飽滿', val: currentEqualizerData.bands.hz1k, color: 'from-emerald-500 to-teal-500' },
+                      { band: '3.5kHz', desc: '子音穿透', val: currentEqualizerData.bands.hz3k5, color: 'from-amber-400 to-orange-500' },
+                      { band: '8kHz', desc: '高頻空氣', val: currentEqualizerData.bands.hz8k, color: 'from-purple-400 to-pink-500' },
                     ].map((b) => (
-                      <div key={b.band} className="bg-slate-900 p-2 rounded-xl border border-slate-800 flex flex-col items-center gap-1.5 text-center">
-                        <span className="text-[10px] font-mono font-bold text-slate-300">{b.band}</span>
-                        <div className="h-20 w-3.5 bg-slate-950 rounded-full flex flex-col justify-end p-0.5 border border-slate-800">
+                      <div key={b.band} className="bg-slate-900 p-1.5 sm:p-2 rounded-xl border border-slate-800 flex flex-col items-center gap-1 sm:gap-1.5 text-center min-w-0">
+                        <span className="text-[9px] sm:text-[10px] font-mono font-bold text-slate-300 truncate w-full">{b.band}</span>
+                        <div className="h-16 sm:h-20 w-3 sm:w-3.5 bg-slate-950 rounded-full flex flex-col justify-end p-0.5 border border-slate-800">
                           <div
                             className={`w-full rounded-full bg-gradient-to-t ${b.color} transition-all duration-300`}
                             style={{ height: `${Math.max(15, Math.min(100, (b.val + 12) * 4.16))}%` }}
                           />
                         </div>
-                        <span className={`text-[10px] font-mono font-black ${b.val > 0 ? 'text-amber-400' : b.val < 0 ? 'text-cyan-400' : 'text-slate-400'}`}>
+                        <span className={`text-[9px] sm:text-[10px] font-mono font-black ${b.val > 0 ? 'text-amber-400' : b.val < 0 ? 'text-cyan-400' : 'text-slate-400'}`}>
                           {b.val > 0 ? `+${b.val}dB` : `${b.val}dB`}
                         </span>
-                        <span className="text-[9px] text-slate-500 leading-tight">{b.desc}</span>
+                        <span className="text-[8px] sm:text-[9px] text-slate-500 leading-tight break-words w-full">{b.desc}</span>
                       </div>
                     ))}
                   </div>
@@ -1605,7 +2245,7 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({
             {activeTab === 'acronyms' && (
               <div className="space-y-3">
                 <div className="flex items-center justify-between text-xs font-bold text-slate-300 flex-wrap gap-2">
-                  <span className="flex items-center gap-1.5">
+                  <span className="flex items-center gap-1.5 tabular-nums">
                     <Sparkles className="w-3.5 h-3.5 text-amber-400" />
                     晶圓廠專業術語發音測試台 ({filteredAcronymItems.length} 組)
                   </span>
@@ -1635,8 +2275,10 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({
                     ].map((cat) => (
                       <button
                         key={cat.id}
+                        type="button"
+                        aria-pressed={acronymCategoryFilter === cat.id}
                         onClick={() => setAcronymCategoryFilter(cat.id)}
-                        className={`px-2 py-1 rounded-lg text-[11px] font-bold border transition-all cursor-pointer whitespace-nowrap ${
+                        className={`px-2 py-1 rounded-lg text-[11px] font-bold border transition-all cursor-pointer whitespace-nowrap focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${
                           acronymCategoryFilter === cat.id
                             ? 'bg-amber-400/20 text-amber-300 border-amber-400/60'
                             : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
@@ -1660,7 +2302,7 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({
                           <span className="text-xs font-black text-amber-300 group-hover:text-amber-200">
                             {item.label}
                           </span>
-                          <span className="text-[9px] px-1.5 py-0.2 rounded font-mono bg-slate-900 text-slate-400 border border-slate-800">
+                          <span className="text-[9px] px-1.5 py-0.5 rounded font-mono bg-slate-900 text-slate-400 border border-slate-800">
                             {item.categoryLabel}
                           </span>
                         </div>
@@ -1678,15 +2320,17 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({
                       {/* Dual Action Buttons */}
                       <div className="pt-2 border-t border-slate-800/80 flex items-center justify-end gap-1.5">
                         <button
+                          type="button"
                           onClick={() => handleTestPhrase(item.text, true)}
-                          className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-slate-900 hover:bg-slate-850 text-cyan-300 border border-cyan-500/30 flex items-center gap-1 cursor-pointer active:scale-95 transition-all"
+                          className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-slate-900 hover:bg-slate-850 text-cyan-300 border border-cyan-500/30 flex items-center gap-1 cursor-pointer active:scale-95 transition-all tabular-nums focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
                         >
                           <Play className="w-2.5 h-2.5" />
                           <span>0.7x 慢速</span>
                         </button>
                         <button
+                          type="button"
                           onClick={() => handleTestPhrase(item.text, false)}
-                          className="px-3 py-1 rounded-lg text-[10px] font-black bg-amber-400 hover:bg-amber-300 text-slate-950 flex items-center gap-1 cursor-pointer active:scale-95 transition-all shadow-sm"
+                          className="px-3 py-1 rounded-lg text-[10px] font-black bg-amber-400 hover:bg-amber-300 text-slate-950 flex items-center gap-1 cursor-pointer active:scale-95 transition-all shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
                         >
                           <Play className="w-2.5 h-2.5 fill-current" />
                           <span>標準發音</span>
@@ -1743,7 +2387,7 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({
                         {customPhoneticAnalysis.detectedTerms.map((t, idx) => (
                           <span
                             key={idx}
-                            className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-amber-400/20 text-amber-300 border border-amber-400/30 flex items-center gap-1"
+                            className="px-2 py-0.5 rounded-md text-[10px] font-mono bg-amber-400/20 text-amber-300 border border-amber-400/30 flex items-center gap-1"
                           >
                             <span className="font-bold">{t.term}</span>
                             <span className="text-slate-400">➔</span>
@@ -1761,17 +2405,19 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({
                     </div>
                     <div className="flex gap-2">
                       <button
+                        type="button"
                         onClick={() => handleCustomTest(true)}
                         disabled={isTesting || !customTestInput.trim()}
-                        className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-200 font-bold text-xs flex items-center gap-1.5 border border-slate-700 active:scale-95 transition-all cursor-pointer disabled:opacity-50"
+                        className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-200 font-bold text-xs flex items-center gap-1.5 border border-slate-700 active:scale-95 transition-all cursor-pointer disabled:opacity-50 tabular-nums focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
                       >
                         <Play className="w-3 h-3 text-cyan-400" />
                         <span>0.7x 慢速拆解</span>
                       </button>
                       <button
+                        type="button"
                         onClick={() => handleCustomTest(false)}
                         disabled={isTesting || !customTestInput.trim()}
-                        className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-400 to-yellow-400 text-slate-950 font-black text-xs flex items-center gap-2 shadow-md hover:brightness-110 active:scale-95 transition-all cursor-pointer disabled:opacity-50"
+                        className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-400 to-yellow-400 text-slate-950 font-black text-xs flex items-center gap-2 shadow-md hover:brightness-110 active:scale-95 transition-all cursor-pointer disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
                       >
                         <Play className="w-3.5 h-3.5 fill-current" />
                         <span>標準朗讀測試</span>
@@ -1825,13 +2471,13 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({
                     </div>
                     <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 flex justify-between items-center">
                       <span className="text-slate-400">已偵測美語語音</span>
-                      <span className="font-mono font-bold text-cyan-300">
+                      <span className="font-mono font-bold text-cyan-300 tabular-nums">
                         {diagnostics?.englishVoicesCount || 0} 組
                       </span>
                     </div>
                     <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 flex justify-between items-center">
                       <span className="text-slate-400">已偵測台灣國語語音</span>
-                      <span className="font-mono font-bold text-amber-300">
+                      <span className="font-mono font-bold text-amber-300 tabular-nums">
                         {diagnostics?.taiwanVoicesCount || 0} 組
                       </span>
                     </div>
@@ -1842,25 +2488,28 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({
                       </span>
                     </div>
                     <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 flex justify-between items-center sm:col-span-2">
-                      <span className="text-slate-400">發音通道運作狀態</span>
-                      <div className="flex items-center gap-2">
+                      <span className="text-slate-400">狀態機監控 (State Machine)</span>
+                      <div className="flex items-center gap-2 flex-wrap justify-end">
                         {diagnostics && diagnostics.queueLength > 0 && (
-                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-950/80 border border-cyan-500/40 text-cyan-300 font-mono">
+                          <span className="text-[10px] px-2 py-0.5 rounded-md bg-cyan-950/80 border border-cyan-500/40 text-cyan-300 font-mono tabular-nums">
                             佇列中: {diagnostics.queueLength} 句
                           </span>
                         )}
+                        <span className="text-[10px] px-2 py-0.5 rounded-md bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 font-mono tabular-nums">
+                          階段: {diagnostics?.enginePhase || 'IDLE'} · Epoch #{diagnostics?.sessionEpoch ?? 0}
+                        </span>
                         <span className="font-mono text-slate-200 font-bold">
                           {diagnostics?.isSpeaking ? '正在朗讀 (Speaking)' : '待命就緒 (Idle Ready)'}
                         </span>
                       </div>
                     </div>
-                    <div className="p-2.5 rounded-xl bg-slate-900 border border-emerald-500/30 flex justify-between items-center sm:col-span-2">
+                    <div className="p-2.5 rounded-xl bg-slate-900 border border-emerald-500/30 flex justify-between items-center sm:col-span-2 flex-wrap gap-2">
                       <div className="flex items-center gap-1.5">
                         <Zap className="w-3.5 h-3.5 text-emerald-400" />
-                        <span className="text-slate-300 font-bold">語音預載 (Prefetch) 緩存</span>
+                        <span className="text-slate-300 font-bold">雙層預緩衝與防衝突監控</span>
                       </div>
-                      <span className="font-mono text-emerald-300 font-bold">
-                        已預加載 {getPrefetchStats().memoryCacheCount} 句型 (命中 {getPrefetchStats().cacheHits} 次)
+                      <span className="font-mono text-emerald-300 font-bold tabular-nums text-[11px]">
+                        RAM 音檔 {diagnostics?.bufferStats?.ramCachedBlobs ?? getPrefetchStats().memoryCacheCount} 組 · 命中 {getPrefetchStats().cacheHits} 次 · 攔截衝突 {diagnostics?.bufferStats?.conflictPreventedCount ?? 0} 次
                       </span>
                     </div>
                   </div>
@@ -1874,11 +2523,12 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({
                       口說錄音與語音辨識硬體測試 (Microphone Test)
                     </h4>
                     <button
+                      type="button"
                       onClick={handleStartMicTest}
                       disabled={micListening}
-                      className="px-3 py-1 rounded-xl bg-indigo-500 hover:bg-indigo-400 text-white font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+                      className="px-3 py-1 rounded-xl bg-indigo-500 hover:bg-indigo-400 text-white font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
                     >
-                      <Mic className={`w-3.5 h-3.5 ${micListening ? 'animate-pulse text-red-300' : ''}`} />
+                      <Mic className={`w-3.5 h-3.5 ${micListening ? 'text-red-300' : ''}`} />
                       <span>{micListening ? '錄音測試中...' : '開始麥克風測試'}</span>
                     </button>
                   </div>
@@ -1896,9 +2546,9 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({
                       <ShieldCheck className="w-4 h-4 text-cyan-400" />
                       手機端發音抗卡頓防護狀態 (Mobile Speech Protection)
                     </h4>
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 font-bold flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
-                      全時防護中
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 font-bold flex items-center gap-1">
+                      <ShieldCheck className="w-3 h-3 text-emerald-400 shrink-0" />
+                      <span>全時防護中</span>
                     </span>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
@@ -2010,16 +2660,16 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({
                 </div>
 
                 {/* Emergency Unlock & Repair Action */}
-                <div className="p-4 bg-amber-950/40 border border-amber-500/40 rounded-2xl flex items-center justify-between gap-3">
+                <div className="p-3.5 sm:p-4 bg-amber-950/40 border border-amber-500/40 rounded-2xl flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
                   <div className="space-y-0.5">
                     <span className="text-xs font-black text-amber-300 block">遇到發音沒聲音或卡住？</span>
-                    <p className="text-[11px] text-amber-200/80">
+                    <p className="text-[11px] text-amber-200/80 leading-relaxed">
                       一鍵徹底解除瀏覽器音訊鎖定、清空死鎖 Utterance、重新載入系統聲線並啟動備援通道。
                     </p>
                   </div>
                   <button
                     onClick={handleResetEngine}
-                    className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-400 to-yellow-400 text-slate-950 font-black text-xs shrink-0 shadow-lg shadow-amber-500/20 active:scale-95 transition-all cursor-pointer"
+                    className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-400 to-yellow-400 text-slate-950 font-black text-xs shrink-0 shadow-lg shadow-amber-500/20 active:scale-95 transition-all cursor-pointer text-center"
                   >
                     🛠️ 深度修復解鎖
                   </button>
@@ -2035,11 +2685,12 @@ export const VoiceSettingsModal: React.FC<VoiceSettingsModalProps> = ({
               💡 提示：使用 Chrome 或 Edge 瀏覽器可享有最流暢的高清自然聲線與台灣在地口音優化。
             </span>
             <button
+              type="button"
               onClick={() => {
                 playSuccessChime();
                 onClose();
               }}
-              className="px-5 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs transition-colors cursor-pointer shadow-md ml-auto"
+              className="px-5 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs transition-colors cursor-pointer shadow-md ml-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
             >
               完成設定
             </button>

@@ -4,6 +4,13 @@
  */
 
 import { AOI_HANDWRITTEN_VOCAB, AOI_HANDWRITTEN_LESSONS } from '../data/aoiHandwrittenData';
+import { loadSrsMap, saveSrsMap } from './srsScheduler';
+import {
+  loadPronunciationAnalytics,
+  savePronunciationAnalytics,
+  mergePronunciationAnalytics
+} from './pronunciationAnalytics';
+import { getStoredGlobalSpeechSpeed, saveGlobalSpeechSpeed } from './speechSpeedCalibrator';
 
 export interface ServerSyncResult {
   success: boolean;
@@ -27,6 +34,30 @@ export interface ServerDatabaseStats {
 let syncDebounceTimer: any = null;
 let isSyncInProgress = false;
 
+function safeParseJson<T>(raw: string | null, fallback: T): T {
+  if (!raw) return fallback;
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(fallback)) {
+      return (Array.isArray(parsed) ? parsed : fallback) as T;
+    }
+    if (fallback && typeof fallback === 'object') {
+      return (parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : fallback) as T;
+    }
+    return parsed as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function safeSetStorage(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Guard against QuotaExceededError or restricted storage
+  }
+}
+
 /**
  * 取得當前客戶端所有欲同步的本機學習數據
  */
@@ -34,41 +65,25 @@ export function collectLocalSyncPayload() {
   if (typeof window === 'undefined') return null;
 
   try {
-    const rawBookmarks = localStorage.getItem('fse_bookmarks');
-    const bookmarks = rawBookmarks ? JSON.parse(rawBookmarks) : [];
-
-    const rawVisited = localStorage.getItem('fse_visited_lessons');
-    const visitedLessonIds = rawVisited ? JSON.parse(rawVisited) : [];
-
-    const rawReadArticles = localStorage.getItem('fse_read_articles');
-    const readArticleIds = rawReadArticles ? JSON.parse(rawReadArticles) : [];
-
-    const rawBookmarkedArticles = localStorage.getItem('fse_bookmarked_articles');
-    const bookmarkedArticleIds = rawBookmarkedArticles ? JSON.parse(rawBookmarkedArticles) : [];
-
-    const rawDiag = localStorage.getItem('fse_user_diagnostics');
-    const diagnostics = rawDiag ? JSON.parse(rawDiag) : {};
-
+    const bookmarks = safeParseJson<any[]>(localStorage.getItem('fse_bookmarks'), []);
+    const visitedLessonIds = safeParseJson<string[]>(localStorage.getItem('fse_visited_lessons'), []);
+    const readArticleIds = safeParseJson<string[]>(localStorage.getItem('fse_read_articles'), []);
+    const bookmarkedArticleIds = safeParseJson<string[]>(localStorage.getItem('fse_bookmarked_articles'), []);
+    const diagnostics = safeParseJson<Record<string, any>>(localStorage.getItem('fse_user_diagnostics'), {});
     const rawStreak = localStorage.getItem('fse_streak');
-    const streakCount = rawStreak ? parseInt(rawStreak, 10) || 1 : 1;
-
-    const rawShift = localStorage.getItem('fse_shift_settings');
-    const shiftSettings = rawShift ? JSON.parse(rawShift) : {};
-
-    const rawLessonNotes = localStorage.getItem('fab_fse_lesson_notes');
-    const lessonNotes = rawLessonNotes ? JSON.parse(rawLessonNotes) : {};
-
-    const rawVocabNotes = localStorage.getItem('fab_fse_vocab_notes');
-    const vocabNotes = rawVocabNotes ? JSON.parse(rawVocabNotes) : {};
-
-    const rawFlashcardMastered = localStorage.getItem('fab_flashcard_mastered');
-    const flashcardMastered = rawFlashcardMastered ? JSON.parse(rawFlashcardMastered) : [];
-
-    const rawImportedVocab = localStorage.getItem('fse_imported_vocab');
-    const importedVocab = rawImportedVocab ? JSON.parse(rawImportedVocab) : [];
-
-    const rawImportedLessons = localStorage.getItem('fse_imported_lessons');
-    const importedLessons = rawImportedLessons ? JSON.parse(rawImportedLessons) : [];
+    const streakCount = rawStreak ? Math.max(1, parseInt(rawStreak, 10) || 1) : 1;
+    const shiftSettings = safeParseJson<Record<string, any>>(localStorage.getItem('fse_shift_settings'), {});
+    const lessonNotes = safeParseJson<Record<string, string>>(localStorage.getItem('fab_fse_lesson_notes'), {});
+    const vocabNotes = safeParseJson<Record<string, string>>(localStorage.getItem('fab_fse_vocab_notes'), {});
+    const flashcardMastered = safeParseJson<string[]>(localStorage.getItem('fab_flashcard_mastered'), []);
+    const importedVocab = safeParseJson<any[]>(localStorage.getItem('fse_imported_vocab'), []);
+    const importedLessons = safeParseJson<any[]>(localStorage.getItem('fse_imported_lessons'), []);
+    const srsMemory = loadSrsMap();
+    const shadowingScores = safeParseJson<Record<string, number>>(localStorage.getItem('fse_shadowing_scores_v1'), {});
+    const pronunciationAnalytics = loadPronunciationAnalytics();
+    const noteTimestamps = safeParseJson<Record<string, number>>(localStorage.getItem('fse_note_timestamps_v1'), {});
+    const speechSpeed = getStoredGlobalSpeechSpeed(0.85);
+    const speechSpeedUpdatedAt = Number(localStorage.getItem('fse_speech_speed_updated_at')) || 0;
 
     return {
       userId: 'fse_engineer_local',
@@ -81,9 +96,15 @@ export function collectLocalSyncPayload() {
       shiftSettings,
       lessonNotes,
       vocabNotes,
+      noteTimestamps,
       flashcardMastered,
       importedVocab,
       importedLessons,
+      srsMemory,
+      shadowingScores,
+      pronunciationAnalytics,
+      speechSpeed,
+      speechSpeedUpdatedAt,
       clientTimestamp: Date.now()
     };
   } catch (err) {
@@ -140,57 +161,106 @@ export async function pushLocalProgressToServer(): Promise<ServerSyncResult> {
 
     // If server merged back additional remote records, safely write to LocalStorage
     if (data.record) {
-      if (data.record.bookmarks && Array.isArray(data.record.bookmarks)) {
-        localStorage.setItem('fse_bookmarks', JSON.stringify(data.record.bookmarks));
+      if (Array.isArray(data.record.bookmarks)) {
+        safeSetStorage('fse_bookmarks', JSON.stringify(data.record.bookmarks));
       }
-      if (data.record.visitedLessonIds && Array.isArray(data.record.visitedLessonIds)) {
-        localStorage.setItem('fse_visited_lessons', JSON.stringify(data.record.visitedLessonIds));
+      if (Array.isArray(data.record.visitedLessonIds)) {
+        safeSetStorage('fse_visited_lessons', JSON.stringify(data.record.visitedLessonIds));
       }
-      if (data.record.readArticleIds && Array.isArray(data.record.readArticleIds)) {
-        localStorage.setItem('fse_read_articles', JSON.stringify(data.record.readArticleIds));
+      if (Array.isArray(data.record.readArticleIds)) {
+        safeSetStorage('fse_read_articles', JSON.stringify(data.record.readArticleIds));
       }
-      if (data.record.bookmarkedArticleIds && Array.isArray(data.record.bookmarkedArticleIds)) {
-        localStorage.setItem('fse_bookmarked_articles', JSON.stringify(data.record.bookmarkedArticleIds));
+      if (Array.isArray(data.record.bookmarkedArticleIds)) {
+        safeSetStorage('fse_bookmarked_articles', JSON.stringify(data.record.bookmarkedArticleIds));
+      }
+      if (data.record.diagnostics && typeof data.record.diagnostics === 'object') {
+        safeSetStorage('fse_user_diagnostics', JSON.stringify(data.record.diagnostics));
       }
       if (data.record.lessonNotes && typeof data.record.lessonNotes === 'object') {
-        localStorage.setItem('fab_fse_lesson_notes', JSON.stringify(data.record.lessonNotes));
+        safeSetStorage('fab_fse_lesson_notes', JSON.stringify(data.record.lessonNotes));
       }
       if (data.record.vocabNotes && typeof data.record.vocabNotes === 'object') {
-        localStorage.setItem('fab_fse_vocab_notes', JSON.stringify(data.record.vocabNotes));
+        safeSetStorage('fab_fse_vocab_notes', JSON.stringify(data.record.vocabNotes));
       }
-      if (data.record.flashcardMastered && Array.isArray(data.record.flashcardMastered)) {
-        localStorage.setItem('fab_flashcard_mastered', JSON.stringify(data.record.flashcardMastered));
+      if (Array.isArray(data.record.flashcardMastered)) {
+        safeSetStorage('fab_flashcard_mastered', JSON.stringify(data.record.flashcardMastered));
       }
-      if (data.record.importedVocab && Array.isArray(data.record.importedVocab) && data.record.importedVocab.length > 0) {
+      if (Array.isArray(data.record.importedVocab) && data.record.importedVocab.length > 0) {
         const customVocab = data.record.importedVocab.filter(
           (v: any) =>
             !String(v?.id || '').startsWith('aoi-') &&
             !AOI_HANDWRITTEN_VOCAB.some((a) => a.word.toLowerCase() === String(v?.word || '').toLowerCase())
         );
-        localStorage.setItem('fse_imported_vocab', JSON.stringify([...AOI_HANDWRITTEN_VOCAB, ...customVocab]));
+        safeSetStorage('fse_imported_vocab', JSON.stringify([...AOI_HANDWRITTEN_VOCAB, ...customVocab]));
       }
-      if (data.record.importedLessons && Array.isArray(data.record.importedLessons) && data.record.importedLessons.length > 0) {
+      if (Array.isArray(data.record.importedLessons) && data.record.importedLessons.length > 0) {
         const customLessons = data.record.importedLessons.filter(
           (l: any) =>
             !String(l?.id || '').startsWith('aoi-') &&
             !AOI_HANDWRITTEN_LESSONS.some((a) => a.english_sentence === l?.english_sentence)
         );
-        localStorage.setItem('fse_imported_lessons', JSON.stringify([...AOI_HANDWRITTEN_LESSONS, ...customLessons]));
+        safeSetStorage('fse_imported_lessons', JSON.stringify([...AOI_HANDWRITTEN_LESSONS, ...customLessons]));
+      }
+      if (data.record.srsMemory && typeof data.record.srsMemory === 'object' && !Array.isArray(data.record.srsMemory)) {
+        const currentLocalSrs = loadSrsMap();
+        const mergedSrs = { ...currentLocalSrs };
+        let hasNewerRemote = false;
+        for (const [lessonId, remoteEntry] of Object.entries<any>(data.record.srsMemory)) {
+          if (!remoteEntry || typeof remoteEntry !== 'object') continue;
+          const localEntry = mergedSrs[lessonId];
+          if (!localEntry || (Number(remoteEntry.lastReviewedAt) || 0) > (Number(localEntry.lastReviewedAt) || 0)) {
+            mergedSrs[lessonId] = remoteEntry;
+            hasNewerRemote = true;
+          }
+        }
+        if (hasNewerRemote || Object.keys(currentLocalSrs).length === 0) {
+          saveSrsMap(mergedSrs);
+        }
+      }
+      if (data.record.shadowingScores && typeof data.record.shadowingScores === 'object' && !Array.isArray(data.record.shadowingScores)) {
+        const localShadowing = safeParseJson<Record<string, number>>(localStorage.getItem('fse_shadowing_scores_v1'), {});
+        const mergedShadowing: Record<string, number> = { ...localShadowing };
+        for (const [scenarioId, rawScore] of Object.entries<any>(data.record.shadowingScores)) {
+          const val = Number(rawScore);
+          if (Number.isFinite(val)) {
+            mergedShadowing[scenarioId] = Math.max(mergedShadowing[scenarioId] ?? 0, Math.min(100, Math.max(0, Math.round(val))));
+          }
+        }
+        safeSetStorage('fse_shadowing_scores_v1', JSON.stringify(mergedShadowing));
+      }
+      if (data.record.noteTimestamps && typeof data.record.noteTimestamps === 'object') {
+        safeSetStorage('fse_note_timestamps_v1', JSON.stringify(data.record.noteTimestamps));
+      }
+      if (data.record.pronunciationAnalytics && typeof data.record.pronunciationAnalytics === 'object') {
+        const mergedAnalytics = mergePronunciationAnalytics(
+          loadPronunciationAnalytics(),
+          data.record.pronunciationAnalytics
+        );
+        savePronunciationAnalytics(mergedAnalytics);
+      }
+      if (
+        typeof data.record.speechSpeed === 'number' &&
+        Number.isFinite(data.record.speechSpeed) &&
+        (Number(data.record.speechSpeedUpdatedAt) || 0) > (payload.speechSpeedUpdatedAt || 0)
+      ) {
+        saveGlobalSpeechSpeed(data.record.speechSpeed);
+        safeSetStorage('fse_speech_speed_updated_at', String(data.record.speechSpeedUpdatedAt));
       }
       if (data.record.streakCount && data.record.streakCount > payload.streakCount) {
-        localStorage.setItem('fse_streak', data.record.streakCount.toString());
+        safeSetStorage('fse_streak', data.record.streakCount.toString());
       }
-      localStorage.setItem('fse_last_server_sync_timestamp', Date.now().toString());
-      localStorage.setItem('fse_server_sync_revision', (data.revision || 1).toString());
+      safeSetStorage('fse_last_server_sync_timestamp', Date.now().toString());
+      safeSetStorage('fse_server_sync_revision', (data.revision || 1).toString());
     }
 
-    // Dispatch global event for UI components
+    // Dispatch global event for UI components to hydrate any newly merged remote records
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('fse-server-synced', {
         detail: {
           timestamp: data.serverTimestamp || Date.now(),
           revision: data.revision || 1,
-          mergedChanges: data.mergedChangesCount || 0
+          mergedChanges: data.mergedChangesCount || 0,
+          record: data.record || null
         }
       }));
     }

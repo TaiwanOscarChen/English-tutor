@@ -1,10 +1,9 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Check, Sparkles, Zap, ShieldAlert, Cpu, Eye, CheckCircle2, Contrast } from 'lucide-react';
+import { X, Check, Sparkles, Contrast } from 'lucide-react';
 import {
   CleanroomScenarioId,
   CLEANROOM_SCENARIOS,
-  applyScenarioToDocument
 } from '../utils/cleanroomScenario';
 import { playClickSound, playLaserScanSound } from '../utils/audioEffects';
 
@@ -25,12 +24,28 @@ export const CleanroomScenarioModal: React.FC<CleanroomScenarioModalProps> = ({
   isHighContrast,
   onToggleHighContrast
 }) => {
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/85 backdrop-blur-md">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="無塵室情境氛圍與對比色調校"
+        onClick={onClose}
+        className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/85 backdrop-blur-md"
+      >
         <motion.div
+          onClick={(e) => e.stopPropagation()}
           initial={{ opacity: 0, scale: 0.95, y: 10 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95, y: 10 }}
@@ -54,12 +69,14 @@ export const CleanroomScenarioModal: React.FC<CleanroomScenarioModalProps> = ({
             </div>
 
             <button
+              type="button"
+              aria-label="關閉情境設定"
               onClick={() => {
                 playClickSound();
                 onClose();
               }}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-800 transition-colors cursor-pointer"
-              title="關閉"
+              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-800 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+              title="關閉 (Esc)"
             >
               <X className="w-5 h-5" />
             </button>
@@ -80,7 +97,7 @@ export const CleanroomScenarioModal: React.FC<CleanroomScenarioModalProps> = ({
                   <span className="text-xs sm:text-sm font-black text-slate-100">
                     WCAG AAA 極限超強對比模式
                   </span>
-                  <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded font-bold ${
+                  <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded font-bold ${
                     isHighContrast ? 'bg-yellow-400 text-slate-950' : 'bg-slate-800 text-slate-400'
                   }`}>
                     {isHighContrast ? '已開啟' : '標準'}
@@ -93,11 +110,13 @@ export const CleanroomScenarioModal: React.FC<CleanroomScenarioModalProps> = ({
             </div>
 
             <button
+              type="button"
+              aria-pressed={isHighContrast}
               onClick={() => {
                 playLaserScanSound();
                 onToggleHighContrast();
               }}
-              className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer shrink-0 border ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer shrink-0 border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${
                 isHighContrast
                   ? 'bg-yellow-400 text-slate-950 border-yellow-300 shadow-md shadow-yellow-500/20'
                   : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700 hover:text-white'
@@ -114,17 +133,27 @@ export const CleanroomScenarioModal: React.FC<CleanroomScenarioModalProps> = ({
               <span className="text-[10px] text-slate-500">點擊立即套用環境光</span>
             </div>
 
-            <div className="grid grid-cols-1 gap-2 max-h-[320px] overflow-y-auto pr-1">
+            <div role="radiogroup" aria-label="晶圓廠情境氛圍選擇" className="grid grid-cols-1 gap-2 max-h-[320px] overflow-y-auto pr-1">
               {CLEANROOM_SCENARIOS.map((sc) => {
                 const isSelected = currentScenario === sc.id;
                 return (
                   <div
                     key={sc.id}
+                    role="radio"
+                    aria-checked={isSelected}
+                    tabIndex={0}
                     onClick={() => {
                       playLaserScanSound();
                       onSelectScenario(sc.id);
                     }}
-                    className={`p-3 rounded-xl border-2 transition-all cursor-pointer relative flex items-start justify-between gap-3 ${
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        playLaserScanSound();
+                        onSelectScenario(sc.id);
+                      }
+                    }}
+                    className={`p-3 rounded-xl border-2 transition-all cursor-pointer relative flex items-start justify-between gap-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${
                       isSelected
                         ? 'bg-slate-950/95 shadow-lg ring-1'
                         : 'bg-slate-950/60 border-slate-800 hover:border-slate-700 hover:bg-slate-950/80'
@@ -142,7 +171,7 @@ export const CleanroomScenarioModal: React.FC<CleanroomScenarioModalProps> = ({
                             {sc.name}
                           </span>
                           <span
-                            className="text-[10px] font-mono px-2 py-0.5 rounded-full font-bold border"
+                            className="text-[10px] font-mono px-2 py-0.5 rounded-md font-bold border"
                             style={{
                               borderColor: `${sc.accentColor}66`,
                               backgroundColor: `${sc.accentColor}18`,
@@ -161,13 +190,13 @@ export const CleanroomScenarioModal: React.FC<CleanroomScenarioModalProps> = ({
                     <div className="shrink-0 flex items-center justify-center pt-1">
                       {isSelected ? (
                         <div
-                          className="w-5 h-5 rounded-full flex items-center justify-center text-slate-950 font-black text-xs shadow-sm"
+                          className="w-5 h-5 rounded-md flex items-center justify-center text-slate-950 font-black text-xs shadow-sm"
                           style={{ backgroundColor: sc.accentColor }}
                         >
                           <Check className="w-3.5 h-3.5 stroke-[3]" />
                         </div>
                       ) : (
-                        <div className="w-5 h-5 rounded-full border border-slate-700" />
+                        <div className="w-5 h-5 rounded-md border border-slate-700" />
                       )}
                     </div>
                   </div>
@@ -180,11 +209,12 @@ export const CleanroomScenarioModal: React.FC<CleanroomScenarioModalProps> = ({
           <div className="pt-2 border-t border-slate-800 flex items-center justify-between text-[11px] text-slate-400">
             <span>情境設定將自動儲存，離線亦維持設定。</span>
             <button
+              type="button"
               onClick={() => {
                 playClickSound();
                 onClose();
               }}
-              className="px-4 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white font-bold transition-colors cursor-pointer border border-slate-700"
+              className="px-4 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white font-bold transition-colors cursor-pointer border border-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
             >
               完成設定
             </button>

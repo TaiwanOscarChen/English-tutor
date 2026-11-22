@@ -1,0 +1,2457 @@
+{
+  "version": 2,
+  "createdAt": "2026-11-14T03:18:41.449Z",
+  "lastFlushedAt": "2026-11-21T18:02:46.260Z",
+  "userProfiles": {
+    "fse_engineer_local": {
+      "userId": "fse_engineer_local",
+      "bookmarks": [],
+      "visitedLessonIds": [
+        "aoi-hw-lesson-1",
+        "imported-lesson-1794625438474-0",
+        "aoi-hw-lesson-2"
+      ],
+      "readArticleIds": [
+        "art-1",
+        "art-cycle-19",
+        "A24-001"
+      ],
+      "bookmarkedArticleIds": [],
+      "diagnostics": {
+        "totalSentencesPracticed": 8,
+        "totalArticlesRead": 0,
+        "speechScoreAverage": 88,
+        "masteredTopics": []
+      },
+      "streakCount": 3,
+      "shiftSettings": {},
+      "lessonNotes": {},
+      "vocabNotes": {},
+      "flashcardMastered": [],
+      "importedVocab": [
+        {
+          "id": "aoi-s1-01",
+          "word": "Die Jump Sensor",
+          "kkPhonetic": "[daɪ dʒʌmp ˋsɛnsɚ]",
+          "ipa": "/daɪ dʒʌmp ˈsɛn.sər/",
+          "syllables": "Die · Jump · Sen·sor",
+          "zhuyinPhonetic": "ㄉㄞ ㄐㄧㄤˋ-ㄆㄨˇ ㄙㄣ-ㄙㄜˋ",
+          "taiwanPhonetic": "【 戴 · 醬普 · 森瑟 】",
+          "singleSounds": [
+            {
+              "sound": "Die",
+              "kk": "[daɪ]",
+              "zhuyin": "ㄉㄞ",
+              "homophone": "戴 (晶粒)"
+            },
+            {
+              "sound": "Jump",
+              "kk": "[dʒʌmp]",
+              "zhuyin": "ㄐㄧㄤˋ-ㄆㄨˇ",
+              "homophone": "醬普 (跳躍)"
+            },
+            {
+              "sound": "Sen",
+              "kk": "[ˋsɛn]",
+              "zhuyin": "ㄙㄣ",
+              "homophone": "森"
+            },
+            {
+              "sound": "sor",
+              "kk": "[sɚ]",
+              "zhuyin": "ㄙㄜˋ",
+              "homophone": "瑟 (感測器)"
+            }
+          ],
+          "partOfSpeech": "n.",
+          "translation": "跳晶感測器",
+          "cleanroomContext": "偵測晶粒是否翹起、疊晶或跳位異常的光電感測器（標準拼法為 Sensor）",
+          "category": "imported",
+          "isImported": true,
+          "sourceFileName": "公開光學檢測單元 1",
+          "exampleSentence": "Check the jump sensor.",
+          "exampleTranslation": "檢查跳晶感測器。",
+          "exampleSentenceZh": "檢查跳晶感測器。",
+          "memoryTrick": "Die(晶粒) + Jump(跳起) + Sensor(感測器)＝跳晶感測器（注意字尾是 -sor）！"
+        },
+        {
+          "id": "aoi-s1-02",
+          "word": "JIG Board",
+          "kkPhonetic": "[dʒɪg bord]",
+          "ipa": "/dʒɪɡ bɔːrd/",
+          "syllables": "JIG · Board",
+          "zhuyinPhonetic": "ㄐㄧˊ-ㄍㄜˊ ㄅㄛˊ-ㄉㄜˊ",
+          "taiwanPhonetic": "【 吉格 · 博德 】",
+          "singleSounds": [
+            {
+              "sound": "JIG",
+              "kk": "[dʒɪg]",
+              "zhuyin": "ㄐㄧˊ-ㄍㄜˊ",
+              "homophone": "吉格 (治具)"
+            },
+            {
+              "sound": "Board",
+              "kk": "[bord]",
+              "zhuyin": "ㄅㄛˊ-ㄉㄜˊ",
+              "homophone": "博德 (板)"
+            }
+          ],
+          "partOfSpeech": "n.",
+          "translation": "JIG 板 / 定位治具板",
+          "cleanroomContext": "光學檢測機台用來校準鏡頭光軸、平台水平與基準座標的專用定位治具板",
+          "category": "imported",
+          "isImported": true,
+          "sourceFileName": "公開光學檢測單元 1",
+          "exampleSentence": "Place the JIG board.",
+          "exampleTranslation": "放置定位治具板。",
+          "exampleSentenceZh": "放置定位治具板。",
+          "memoryTrick": "JIG(治具) + Board(板子)＝調機與對焦必備的「JIG 定位治具板」！"
+        },
+        {
+          "id": "aoi-s1-03",
+          "word": "Inspection",
+          "kkPhonetic": "[ɪnˋspɛkʃən]",
+          "ipa": "/ɪnˈspɛk.ʃən/",
+          "syllables": "In·spec·tion",
+          "zhuyinPhonetic": "ㄧㄣ-ㄙ-ㄆㄟˋ-ㄎㄜ-ㄒㄩㄢ",
+          "taiwanPhonetic": "【 因 · 斯佩克 · 宣 】",
+          "singleSounds": [
+            {
+              "sound": "In",
+              "kk": "[ɪn]",
+              "zhuyin": "ㄧㄣ",
+              "homophone": "因 (往內)"
+            },
+            {
+              "sound": "spec",
+              "kk": "[ˋspɛk]",
+              "zhuyin": "ㄙ-ㄆㄟˋ-ㄎㄜ",
+              "homophone": "斯佩克 (看)"
+            },
+            {
+              "sound": "tion",
+              "kk": "[ʃən]",
+              "zhuyin": "ㄒㄩㄢ",
+              "homophone": "宣 (名詞字尾)"
+            }
+          ],
+          "partOfSpeech": "n.",
+          "translation": "檢測",
+          "cleanroomContext": "透過高解析光學鏡頭自動掃描晶圓或封裝基板表面缺陷的檢測程序",
+          "category": "imported",
+          "isImported": true,
+          "sourceFileName": "公開光學檢測單元 1",
+          "exampleSentence": "Start the inspection.",
+          "exampleTranslation": "啟動光學檢測。",
+          "exampleSentenceZh": "啟動光學檢測。",
+          "memoryTrick": "In(往內) + spec(看) + tion＝仔細往裡面看就是「檢測」！"
+        },
+        {
+          "id": "aoi-s1-04",
+          "word": "Tuning Light",
+          "kkPhonetic": "[ˋtunɪŋ laɪt]",
+          "ipa": "/ˈtuː.nɪŋ laɪt/",
+          "syllables": "Tu·ning · Light",
+          "zhuyinPhonetic": "ㄊㄨˊ-ㄋㄧㄥˊ ㄌㄞˋ-ㄊㄜ",
+          "taiwanPhonetic": "【 圖寧 · 賴特 】",
+          "singleSounds": [
+            {
+              "sound": "Tu",
+              "kk": "[ˋtu]",
+              "zhuyin": "ㄊㄨˊ",
+              "homophone": "圖"
+            },
+            {
+              "sound": "ning",
+              "kk": "[nɪŋ]",
+              "zhuyin": "ㄋㄧㄥˊ",
+              "homophone": "寧 (調整)"
+            },
+            {
+              "sound": "Light",
+              "kk": "[laɪt]",
+              "zhuyin": "ㄌㄞˋ-ㄊㄜ",
+              "homophone": "賴特 (光源)"
+            }
+          ],
+          "partOfSpeech": "n./v.",
+          "translation": "調整光源",
+          "cleanroomContext": "調整同軸光與環形光亮度比例，使缺陷與背景對比最清晰",
+          "category": "imported",
+          "isImported": true,
+          "sourceFileName": "公開光學檢測單元 1",
+          "exampleSentence": "We tune the light.",
+          "exampleTranslation": "我們調整光源。",
+          "exampleSentenceZh": "我們調整光源。",
+          "memoryTrick": "Tuning(調校微調) + Light(燈光)＝「調整光源」！"
+        },
+        {
+          "id": "aoi-s1-05",
+          "word": "Inspection Teach",
+          "kkPhonetic": "[ɪnˋspɛkʃən titʃ]",
+          "ipa": "/ɪnˈspɛk.ʃən tiːtʃ/",
+          "syllables": "In·spec·tion · Teach",
+          "zhuyinPhonetic": "ㄧㄣ-ㄙ-ㄆㄟˋ-ㄎㄜ-ㄒㄩㄢ ㄊㄧˋ-ㄑㄩˇ",
+          "taiwanPhonetic": "【 因斯佩克宣 · 替取 】",
+          "singleSounds": [
+            {
+              "sound": "Inspection",
+              "kk": "[ɪnˋspɛkʃən]",
+              "zhuyin": "ㄧㄣ-ㄙ-ㄆㄟˋ-ㄎㄜ-ㄒㄩㄢ",
+              "homophone": "因斯佩克宣 (檢測)"
+            },
+            {
+              "sound": "Teach",
+              "kk": "[titʃ]",
+              "zhuyin": "ㄊㄧˋ-ㄑㄩˇ",
+              "homophone": "替取 (教導)"
+            }
+          ],
+          "partOfSpeech": "n.",
+          "translation": "檢測教導",
+          "cleanroomContext": "在軟體框選檢測區域並設定基準影像，教導機台如何辨識良品與缺陷",
+          "category": "imported",
+          "isImported": true,
+          "sourceFileName": "公開光學檢測單元 1",
+          "exampleSentence": "Run inspection teach.",
+          "exampleTranslation": "執行檢測教導。",
+          "exampleSentenceZh": "執行檢測教導。",
+          "memoryTrick": "Inspection(檢測) + Teach(教導)＝教機台怎麼抓瑕疵的「檢測教導」！"
+        },
+        {
+          "id": "aoi-s1-06",
+          "word": "Align",
+          "kkPhonetic": "[əˋlaɪn]",
+          "ipa": "/əˈlaɪn/",
+          "syllables": "A·lign",
+          "zhuyinPhonetic": "ㄜ-ㄌㄞˋ-ㄣ",
+          "taiwanPhonetic": "【 額 · 賴恩 】",
+          "singleSounds": [
+            {
+              "sound": "A",
+              "kk": "[ə]",
+              "zhuyin": "ㄜ",
+              "homophone": "額"
+            },
+            {
+              "sound": "lign",
+              "kk": "[ˋlaɪn]",
+              "zhuyin": "ㄌㄞˋ-ㄣ",
+              "homophone": "賴恩 (g不發音)"
+            }
+          ],
+          "partOfSpeech": "v.",
+          "translation": "定位",
+          "cleanroomContext": "利用靶標十字對位點進行視覺角度與座標校正定位",
+          "category": "imported",
+          "isImported": true,
+          "sourceFileName": "公開光學檢測單元 1",
+          "exampleSentence": "We align the mark.",
+          "exampleTranslation": "我們對準定位標記。",
+          "exampleSentenceZh": "我們對準定位標記。",
+          "memoryTrick": "A + lign(唸法像 line 線)＝對齊基準線就是「定位」（g 不發音）！"
+        },
+        {
+          "id": "aoi-s1-07",
+          "word": "Layout",
+          "kkPhonetic": "[ˋle͵aʊt]",
+          "ipa": "/ˈleɪ.aʊt/",
+          "syllables": "Lay·out",
+          "zhuyinPhonetic": "ㄌㄟˊ-ㄠˋ-ㄊㄜ",
+          "taiwanPhonetic": "【 雷 · 奧特 】",
+          "singleSounds": [
+            {
+              "sound": "Lay",
+              "kk": "[ˋle]",
+              "zhuyin": "ㄌㄟˊ",
+              "homophone": "雷 (鋪設)"
+            },
+            {
+              "sound": "out",
+              "kk": "[͵aʊt]",
+              "zhuyin": "ㄠˋ-ㄊㄜ",
+              "homophone": "奧特 (展開)"
+            }
+          ],
+          "partOfSpeech": "n.",
+          "translation": "模板",
+          "cleanroomContext": "基板或晶圓上所有晶粒行列座標排列的幾何陣列模板",
+          "category": "imported",
+          "isImported": true,
+          "sourceFileName": "公開光學檢測單元 1",
+          "exampleSentence": "Check the die layout.",
+          "exampleTranslation": "檢查晶粒模板。",
+          "exampleSentenceZh": "檢查晶粒模板。",
+          "memoryTrick": "Lay(擺放) + out(展開出來)＝把晶粒排列展開的「模板」！"
+        },
+        {
+          "id": "aoi-s1-08",
+          "word": "Layout Transfer",
+          "kkPhonetic": "[ˋle͵aʊt ˋtrænsfɚ]",
+          "ipa": "/ˈleɪ.aʊt ˈtræns.fər/",
+          "syllables": "Lay·out · Trans·fer",
+          "zhuyinPhonetic": "ㄌㄟˊ-ㄠˋ-ㄊㄜ ㄔㄨㄢ-ㄙ-ㄈㄜ",
+          "taiwanPhonetic": "【 雷奧特 · 穿斯弗 】",
+          "singleSounds": [
+            {
+              "sound": "Layout",
+              "kk": "[ˋle͵aʊt]",
+              "zhuyin": "ㄌㄟˊ-ㄠˋ-ㄊㄜ",
+              "homophone": "雷奧特 (模板)"
+            },
+            {
+              "sound": "Trans",
+              "kk": "[ˋtræns]",
+              "zhuyin": "ㄔㄨㄢ-ㄙ",
+              "homophone": "穿斯 (轉換)"
+            },
+            {
+              "sound": "fer",
+              "kk": "[fɚ]",
+              "zhuyin": "ㄈㄜ",
+              "homophone": "弗 (移轉)"
+            }
+          ],
+          "partOfSpeech": "n.",
+          "translation": "模板轉換",
+          "cleanroomContext": "將設計圖檔或教導好的單顆模板座標轉換套用到整片基板陣列",
+          "category": "imported",
+          "isImported": true,
+          "sourceFileName": "公開光學檢測單元 1",
+          "exampleSentence": "Run layout transfer.",
+          "exampleTranslation": "執行模板轉換。",
+          "exampleSentenceZh": "執行模板轉換。",
+          "memoryTrick": "Layout(模板) + Transfer(轉換傳送)＝「模板轉換」！"
+        },
+        {
+          "id": "aoi-s1-09",
+          "word": "Detect Empty",
+          "kkPhonetic": "[dɪˋtɛkt ˋɛmptɪ]",
+          "ipa": "/dɪˈtɛkt ˈɛmp.ti/",
+          "syllables": "De·tect · Emp·ty",
+          "zhuyinPhonetic": "ㄉㄧ-ㄊㄟˋ-ㄎㄜ-ㄊㄜ ㄣ-ㄆㄨˇ-ㄊㄧˋ",
+          "taiwanPhonetic": "【 迪泰克特 · 恩普替 】",
+          "singleSounds": [
+            {
+              "sound": "De",
+              "kk": "[dɪ]",
+              "zhuyin": "ㄉㄧ",
+              "homophone": "迪"
+            },
+            {
+              "sound": "tect",
+              "kk": "[ˋtɛkt]",
+              "zhuyin": "ㄊㄟˋ-ㄎㄜ-ㄊㄜ",
+              "homophone": "泰克特 (搜索)"
+            },
+            {
+              "sound": "Emp",
+              "kk": "[ˋɛmp]",
+              "zhuyin": "ㄣ-ㄆㄨˇ",
+              "homophone": "恩普"
+            },
+            {
+              "sound": "ty",
+              "kk": "[tɪ]",
+              "zhuyin": "ㄊㄧˋ",
+              "homophone": "替 (空的)"
+            }
+          ],
+          "partOfSpeech": "v./n.",
+          "translation": "搜索無目標",
+          "cleanroomContext": "鏡頭搜索不到目標晶粒、空焊盤或插槽無基板（搜索無 / 沒找到）",
+          "category": "imported",
+          "isImported": true,
+          "sourceFileName": "公開光學檢測單元 1",
+          "exampleSentence": "Sensor detects empty.",
+          "exampleTranslation": "感測器搜索無目標。",
+          "exampleSentenceZh": "感測器搜索無目標。",
+          "memoryTrick": "Detect(搜索偵測) + Empty(空的)＝「搜索無目標（沒找到）」！"
+        },
+        {
+          "id": "aoi-s1-10",
+          "word": "2D Code",
+          "kkPhonetic": "[ˋtu ˋdi kod]",
+          "ipa": "/ˌtuːˈdiː koʊd/",
+          "syllables": "2·D · Code",
+          "zhuyinPhonetic": "ㄊㄨˋ-ㄉㄧˊ ㄎㄡ-ㄉㄜˊ",
+          "taiwanPhonetic": "【 兔迪 · 扣得 】",
+          "singleSounds": [
+            {
+              "sound": "2D",
+              "kk": "[ˋtu ˋdi]",
+              "zhuyin": "ㄊㄨˋ-ㄉㄧˊ",
+              "homophone": "兔迪 (2維)"
+            },
+            {
+              "sound": "Code",
+              "kk": "[kod]",
+              "zhuyin": "ㄎㄡ-ㄉㄜˊ",
+              "homophone": "扣得 (條碼)"
+            }
+          ],
+          "partOfSpeech": "n.",
+          "translation": "2維條碼",
+          "cleanroomContext": "雷射刻印於基板或晶圓載具上的 DataMatrix 二維追蹤條碼",
+          "category": "imported",
+          "isImported": true,
+          "sourceFileName": "公開光學檢測單元 1",
+          "exampleSentence": "Scan the 2D code.",
+          "exampleTranslation": "掃描二維條碼。",
+          "exampleSentenceZh": "掃描二維條碼。",
+          "memoryTrick": "2D(二維平面) + Code(條碼代號)＝「2維條碼」！"
+        },
+        {
+          "id": "aoi-s1-11",
+          "word": "Substrate Inspection",
+          "kkPhonetic": "[ˋsʌbstret ɪnˋspɛkʃən]",
+          "ipa": "/ˈsʌb.streɪt ɪnˈspɛk.ʃən/",
+          "syllables": "Sub·strate · In·spec·tion",
+          "zhuyinPhonetic": "ㄙㄚˋ-ㄅㄨ-ㄙ-ㄘㄨㄟˋ-ㄊㄜ ㄧㄣ-ㄙ-ㄆㄟˋ-ㄎㄜ-ㄒㄩㄢ",
+          "taiwanPhonetic": "【 薩布斯翠特 · 因斯佩克宣 】",
+          "singleSounds": [
+            {
+              "sound": "Sub",
+              "kk": "[ˋsʌb]",
+              "zhuyin": "ㄙㄚˋ-ㄅㄨ",
+              "homophone": "薩布 (底下)"
+            },
+            {
+              "sound": "strate",
+              "kk": "[stret]",
+              "zhuyin": "ㄙ-ㄘㄨㄟˋ-ㄊㄜ",
+              "homophone": "斯翠特 (基板層)"
+            },
+            {
+              "sound": "Inspection",
+              "kk": "[ɪnˋspɛkʃən]",
+              "zhuyin": "ㄧㄣ-ㄙ-ㄆㄟˋ-ㄎㄜ-ㄒㄩㄢ",
+              "homophone": "因斯佩克宣 (檢測)"
+            }
+          ],
+          "partOfSpeech": "n.",
+          "translation": "基板檢測",
+          "cleanroomContext": "檢查封裝載板表面線路刮傷、異物污染或綠漆破損（標準拼法為 Substrate）",
+          "category": "imported",
+          "isImported": true,
+          "sourceFileName": "公開光學檢測單元 1",
+          "exampleSentence": "Run substrate inspection.",
+          "exampleTranslation": "執行基板檢測。",
+          "exampleSentenceZh": "執行基板檢測。",
+          "memoryTrick": "Sub(在底下) + strate(層板)＝承載晶片的「基板檢測」（注意字尾是 -strate）！"
+        },
+        {
+          "id": "aoi-s1-12",
+          "word": "C4 Bump Inspection",
+          "kkPhonetic": "[ˋsi ˋfor bʌmp ɪnˋspɛkʃən]",
+          "ipa": "/ˌsiːˈfɔːr bʌmp ɪnˈspɛk.ʃən/",
+          "syllables": "C·4 · Bump · In·spec·tion",
+          "zhuyinPhonetic": "ㄒㄧ-ㄈㄛˊ ㄅㄤˋ-ㄆㄨˇ ㄧㄣ-ㄙ-ㄆㄟˋ-ㄎㄜ-ㄒㄩㄢ",
+          "taiwanPhonetic": "【 西佛 · 棒普 · 因斯佩克宣 】",
+          "singleSounds": [
+            {
+              "sound": "C4",
+              "kk": "[ˋsi ˋfor]",
+              "zhuyin": "ㄒㄧ-ㄈㄛˊ",
+              "homophone": "西佛 (覆晶連接)"
+            },
+            {
+              "sound": "Bump",
+              "kk": "[bʌmp]",
+              "zhuyin": "ㄅㄤˋ-ㄆㄨˇ",
+              "homophone": "棒普 (錫球凸塊)"
+            },
+            {
+              "sound": "Inspection",
+              "kk": "[ɪnˋspɛkʃən]",
+              "zhuyin": "ㄧㄣ-ㄙ-ㄆㄟˋ-ㄎㄜ-ㄒㄩㄢ",
+              "homophone": "因斯佩克宣 (檢測)"
+            }
+          ],
+          "partOfSpeech": "n.",
+          "translation": "錫球檢測",
+          "cleanroomContext": "檢測覆晶封裝微錫球凸塊是否缺球、橋接短路、偏移或大小異常",
+          "category": "imported",
+          "isImported": true,
+          "sourceFileName": "公開光學檢測單元 1",
+          "exampleSentence": "Check the C4 bumps.",
+          "exampleTranslation": "檢查錫球凸塊。",
+          "exampleSentenceZh": "檢查錫球凸塊。",
+          "memoryTrick": "C4 Bump(覆晶微錫球凸塊) + Inspection(檢測)＝「錫球檢測」！"
+        },
+        {
+          "id": "aoi-s1-13",
+          "word": "Die Inspection",
+          "kkPhonetic": "[daɪ ɪnˋspɛkʃən]",
+          "ipa": "/daɪ ɪnˈspɛk.ʃən/",
+          "syllables": "Die · In·spec·tion",
+          "zhuyinPhonetic": "ㄉㄞ ㄧㄣ-ㄙ-ㄆㄟˋ-ㄎㄜ-ㄒㄩㄢ",
+          "taiwanPhonetic": "【 戴 · 因斯佩克宣 】",
+          "singleSounds": [
+            {
+              "sound": "Die",
+              "kk": "[daɪ]",
+              "zhuyin": "ㄉㄞ",
+              "homophone": "戴 (晶粒)"
+            },
+            {
+              "sound": "Inspection",
+              "kk": "[ɪnˋspɛkʃən]",
+              "zhuyin": "ㄧㄣ-ㄙ-ㄆㄟˋ-ㄎㄜ-ㄒㄩㄢ",
+              "homophone": "因斯佩克宣 (檢測)"
+            }
+          ],
+          "partOfSpeech": "n.",
+          "translation": "晶粒檢測",
+          "cleanroomContext": "檢查單顆晶粒表面崩角、裂紋、刮傷與偏移",
+          "category": "imported",
+          "isImported": true,
+          "sourceFileName": "公開光學檢測單元 1",
+          "exampleSentence": "Run die inspection.",
+          "exampleTranslation": "執行晶粒檢測。",
+          "exampleSentenceZh": "執行晶粒檢測。",
+          "memoryTrick": "Die(晶粒) + Inspection(檢測)＝「晶粒檢測」！"
+        },
+        {
+          "id": "aoi-s1-14",
+          "word": "Couple Die Inspection",
+          "kkPhonetic": "[ˋkʌp! daɪ ɪnˋspɛkʃən]",
+          "ipa": "/ˈkʌp.əl daɪ ɪnˈspɛk.ʃən/",
+          "syllables": "Cou·ple · Die · In·spec·tion",
+          "zhuyinPhonetic": "ㄎㄚˇ-ㄆㄛˊ ㄉㄞ ㄧㄣ-ㄙ-ㄆㄟˋ-ㄎㄜ-ㄒㄩㄢ",
+          "taiwanPhonetic": "【 卡婆 · 戴 · 因斯佩克宣 】",
+          "singleSounds": [
+            {
+              "sound": "Couple",
+              "kk": "[ˋkʌp!]",
+              "zhuyin": "ㄎㄚˇ-ㄆㄛˊ",
+              "homophone": "卡婆 (複數/成對)"
+            },
+            {
+              "sound": "Die",
+              "kk": "[daɪ]",
+              "zhuyin": "ㄉㄞ",
+              "homophone": "戴 (晶粒)"
+            },
+            {
+              "sound": "Inspection",
+              "kk": "[ɪnˋspɛkʃən]",
+              "zhuyin": "ㄧㄣ-ㄙ-ㄆㄟˋ-ㄎㄜ-ㄒㄩㄢ",
+              "homophone": "因斯佩克宣 (檢測)"
+            }
+          ],
+          "partOfSpeech": "n.",
+          "translation": "複數晶粒檢測",
+          "cleanroomContext": "針對多晶片封裝上並排之複數晶粒進行相對間距與外觀檢測",
+          "category": "imported",
+          "isImported": true,
+          "sourceFileName": "公開光學檢測單元 1",
+          "exampleSentence": "Check the couple dies.",
+          "exampleTranslation": "檢查複數晶粒。",
+          "exampleSentenceZh": "檢查複數晶粒。",
+          "memoryTrick": "Couple(成雙、複數) + Die(晶粒) + Inspection＝「複數晶粒檢測」！"
+        },
+        {
+          "id": "aoi-s1-15",
+          "word": "Underfill Inspection",
+          "kkPhonetic": "[ˋʌndɚ͵fɪl ɪnˋspɛkʃən]",
+          "ipa": "/ˈʌn.dər.fɪl ɪnˈspɛk.ʃən/",
+          "syllables": "Un·der·fill · In·spec·tion",
+          "zhuyinPhonetic": "ㄢ-ㄉㄜˊ-ㄈㄟ-ㄛ ㄧㄣ-ㄙ-ㄆㄟˋ-ㄎㄜ-ㄒㄩㄢ",
+          "taiwanPhonetic": "【 安德菲爾 · 因斯佩克宣 】",
+          "singleSounds": [
+            {
+              "sound": "Under",
+              "kk": "[ˋʌndɚ]",
+              "zhuyin": "ㄢ-ㄉㄜˊ",
+              "homophone": "安德 (在底部)"
+            },
+            {
+              "sound": "fill",
+              "kk": "[͵fɪl]",
+              "zhuyin": "ㄈㄟ-ㄛ",
+              "homophone": "菲爾 (填膠)"
+            },
+            {
+              "sound": "Inspection",
+              "kk": "[ɪnˋspɛkʃən]",
+              "zhuyin": "ㄧㄣ-ㄙ-ㄆㄟˋ-ㄎㄜ-ㄒㄩㄢ",
+              "homophone": "因斯佩克宣 (檢測)"
+            }
+          ],
+          "partOfSpeech": "n.",
+          "translation": "底膠檢測",
+          "cleanroomContext": "檢測晶粒底部填充保護膠之爬膠寬度、溢膠範圍、氣泡與未填滿缺陷",
+          "category": "imported",
+          "isImported": true,
+          "sourceFileName": "公開光學檢測單元 1",
+          "exampleSentence": "Check the underfill.",
+          "exampleTranslation": "檢查底膠狀態。",
+          "exampleSentenceZh": "檢查底膠狀態。",
+          "memoryTrick": "Under(在底下) + fill(填滿)＝點在晶粒底下的「底膠檢測」！"
+        },
+        {
+          "id": "aoi-s1-16",
+          "word": "PC Inspection",
+          "kkPhonetic": "[ˋpi ˋsi ɪnˋspɛkʃən]",
+          "ipa": "/ˌpiːˈsiː ɪnˈspɛk.ʃən/",
+          "syllables": "P·C · In·spec·tion",
+          "zhuyinPhonetic": "ㄆㄧ-ㄒㄧ ㄧㄣ-ㄙ-ㄆㄟˋ-ㄎㄜ-ㄒㄩㄢ",
+          "taiwanPhonetic": "【 批西 · 因斯佩克宣 】",
+          "singleSounds": [
+            {
+              "sound": "PC",
+              "kk": "[ˋpi ˋsi]",
+              "zhuyin": "ㄆㄧ-ㄒㄧ",
+              "homophone": "批西 (被動元件)"
+            },
+            {
+              "sound": "Inspection",
+              "kk": "[ɪnˋspɛkʃən]",
+              "zhuyin": "ㄧㄣ-ㄙ-ㄆㄟˋ-ㄎㄜ-ㄒㄩㄢ",
+              "homophone": "因斯佩克宣 (檢測)"
+            }
+          ],
+          "partOfSpeech": "n.",
+          "translation": "被動元件檢測",
+          "cleanroomContext": "檢測基板表面貼裝的電容、電阻等被動元件是否缺件、立碑、偏移或極性反置",
+          "category": "imported",
+          "isImported": true,
+          "sourceFileName": "公開光學檢測單元 1",
+          "exampleSentence": "Run PC inspection.",
+          "exampleTranslation": "執行被動元件檢測。",
+          "exampleSentenceZh": "執行被動元件檢測。",
+          "memoryTrick": "PC 是 Passive Component（被動元件）縮寫，檢查小電容電阻有沒貼歪！"
+        },
+        {
+          "id": "aoi-s1-17",
+          "word": "Lid Inspection",
+          "kkPhonetic": "[lɪd ɪnˋspɛkʃən]",
+          "ipa": "/lɪd ɪnˈspɛk.ʃən/",
+          "syllables": "Lid · In·spec·tion",
+          "zhuyinPhonetic": "ㄌㄧˋ-ㄉㄜˊ ㄧㄣ-ㄙ-ㄆㄟˋ-ㄎㄜ-ㄒㄩㄢ",
+          "taiwanPhonetic": "【 利德 · 因斯佩克宣 】",
+          "singleSounds": [
+            {
+              "sound": "Lid",
+              "kk": "[lɪd]",
+              "zhuyin": "ㄌㄧˋ-ㄉㄜˊ",
+              "homophone": "利德 (散熱上蓋)"
+            },
+            {
+              "sound": "Inspection",
+              "kk": "[ɪnˋspɛkʃən]",
+              "zhuyin": "ㄧㄣ-ㄙ-ㄆㄟˋ-ㄎㄜ-ㄒㄩㄢ",
+              "homophone": "因斯佩克宣 (檢測)"
+            }
+          ],
+          "partOfSpeech": "n.",
+          "translation": "散熱片檢測",
+          "cleanroomContext": "檢測封裝均熱片金屬上蓋貼合平整度、表面刮傷、溢膠與印字品質",
+          "category": "imported",
+          "isImported": true,
+          "sourceFileName": "公開光學檢測單元 1",
+          "exampleSentence": "Run lid inspection.",
+          "exampleTranslation": "執行散熱片檢測。",
+          "exampleSentenceZh": "執行散熱片檢測。",
+          "memoryTrick": "Lid(蓋子/均熱上蓋) + Inspection＝封裝頂部金屬「散熱片檢測」！"
+        },
+        {
+          "id": "aoi-s1-18",
+          "word": "OCV Inspection",
+          "kkPhonetic": "[ˋo ˋsi ˋvi ɪnˋspɛkʃən]",
+          "ipa": "/ˌoʊ.siːˈviː ɪnˈspɛk.ʃən/",
+          "syllables": "O·C·V · In·spec·tion",
+          "zhuyinPhonetic": "ㄡ-ㄒㄧ-ㄨㄟˊ ㄧㄣ-ㄙ-ㄆㄟˋ-ㄎㄜ-ㄒㄩㄢ",
+          "taiwanPhonetic": "【 歐西維 · 因斯佩克宣 】",
+          "singleSounds": [
+            {
+              "sound": "OCV",
+              "kk": "[ˋo ˋsi ˋvi]",
+              "zhuyin": "ㄡ-ㄒㄧ-ㄨㄟˊ",
+              "homophone": "歐西維 (字元驗證)"
+            },
+            {
+              "sound": "Inspection",
+              "kk": "[ɪnˋspɛkʃən]",
+              "zhuyin": "ㄧㄣ-ㄙ-ㄆㄟˋ-ㄎㄜ-ㄒㄩㄢ",
+              "homophone": "因斯佩克宣 (檢測)"
+            }
+          ],
+          "partOfSpeech": "n.",
+          "translation": "字元檢測",
+          "cleanroomContext": "驗證產品表面雷射印字是否清晰、有無斷字、重影或印字不良",
+          "category": "imported",
+          "isImported": true,
+          "sourceFileName": "公開光學檢測單元 1",
+          "exampleSentence": "Run OCV inspection.",
+          "exampleTranslation": "執行字元檢測。",
+          "exampleSentenceZh": "執行字元檢測。",
+          "memoryTrick": "OCV (V=Verification 驗證檢查)＝檢查字印得對不對、清不清楚的「字元檢測」！"
+        },
+        {
+          "id": "aoi-s1-19",
+          "word": "OCR Inspection",
+          "kkPhonetic": "[ˋo ˋsi ˋɑr ɪnˋspɛkʃən]",
+          "ipa": "/ˌoʊ.siːˈɑːr ɪnˈspɛk.ʃən/",
+          "syllables": "O·C·R · In·spec·tion",
+          "zhuyinPhonetic": "ㄡ-ㄒㄧ-ㄚˇ ㄧㄣ-ㄙ-ㄆㄟˋ-ㄎㄜ-ㄒㄩㄢ",
+          "taiwanPhonetic": "【 歐西阿 · 因斯佩克宣 】",
+          "singleSounds": [
+            {
+              "sound": "OCR",
+              "kk": "[ˋo ˋsi ˋɑr]",
+              "zhuyin": "ㄡ-ㄒㄧ-ㄚˇ",
+              "homophone": "歐西阿 (字元辨識)"
+            },
+            {
+              "sound": "Inspection",
+              "kk": "[ɪnˋspɛkʃən]",
+              "zhuyin": "ㄧㄣ-ㄙ-ㄆㄟˋ-ㄎㄜ-ㄒㄩㄢ",
+              "homophone": "因斯佩克宣 (檢測)"
+            }
+          ],
+          "partOfSpeech": "n.",
+          "translation": "字元辨識",
+          "cleanroomContext": "透過光學鏡頭自動讀取並辨識晶片或基板上的批號與刻號字串",
+          "category": "imported",
+          "isImported": true,
+          "sourceFileName": "公開光學檢測單元 1",
+          "exampleSentence": "Run OCR inspection.",
+          "exampleTranslation": "執行字元辨識。",
+          "exampleSentenceZh": "執行字元辨識。",
+          "memoryTrick": "OCR (R=Recognition 辨識讀取)＝把刻號唸出來並核對資料庫的「字元辨識」！"
+        },
+        {
+          "id": "aoi-s1-20",
+          "word": "Cu Pad",
+          "kkPhonetic": "[ˋkɑpɚ pæd]",
+          "ipa": "/ˈkɑː.pər pæd/",
+          "syllables": "Cu · Pad",
+          "zhuyinPhonetic": "ㄎㄚˇ-ㄆㄜˋ ㄆㄞˋ-ㄉㄜˊ",
+          "taiwanPhonetic": "【 卡珀 · 派德 】",
+          "singleSounds": [
+            {
+              "sound": "Cu",
+              "kk": "[ˋkɑpɚ]",
+              "zhuyin": "ㄎㄚˇ-ㄆㄜˋ",
+              "homophone": "卡珀 (銅元素 Cu)"
+            },
+            {
+              "sound": "Pad",
+              "kk": "[pæd]",
+              "zhuyin": "ㄆㄞˋ-ㄉㄜˊ",
+              "homophone": "派德 (銅墊)"
+            }
+          ],
+          "partOfSpeech": "n.",
+          "translation": "銅墊",
+          "cleanroomContext": "基板或晶圓表面裸露供導電接合的銅金屬焊墊，檢測是否氧化、異物或刮傷",
+          "category": "imported",
+          "isImported": true,
+          "sourceFileName": "公開光學檢測單元 1",
+          "exampleSentence": "Inspect the Cu pad.",
+          "exampleTranslation": "檢查基板銅墊。",
+          "exampleSentenceZh": "檢查基板銅墊。",
+          "memoryTrick": "Cu 是化學元素 Copper(銅)，Cu Pad 就是基板上的導電「銅墊」！"
+        },
+        {
+          "id": "aoi-s2-01",
+          "word": "Process State",
+          "kkPhonetic": "[ˋprɑsɛs stet]",
+          "ipa": "/ˈprɑː.sɛs steɪt/",
+          "syllables": "Pro·cess · State",
+          "zhuyinPhonetic": "ㄆㄨ-ㄌㄨㄛˊ-ㄙㄞˋ-ㄙ ㄙ-ㄊㄟˋ-ㄊㄜ",
+          "taiwanPhonetic": "【 普羅賽斯 · 斯泰特 】",
+          "singleSounds": [
+            {
+              "sound": "Process",
+              "kk": "[ˋprɑsɛs]",
+              "zhuyin": "ㄆㄨ-ㄌㄨㄛˊ-ㄙㄞˋ-ㄙ",
+              "homophone": "普羅賽斯 (製程)"
+            },
+            {
+              "sound": "State",
+              "kk": "[stet]",
+              "zhuyin": "ㄙ-ㄊㄟˋ-ㄊㄜ",
+              "homophone": "斯泰特 (狀態)"
+            }
+          ],
+          "partOfSpeech": "n.",
+          "translation": "製程狀態",
+          "cleanroomContext": "機台當前的生產階段（No Wafer → No Process → Wait Process → Processing → End Process）",
+          "category": "imported",
+          "isImported": true,
+          "sourceFileName": "公開光學檢測單元 2",
+          "exampleSentence": "Check the process state.",
+          "exampleTranslation": "檢查製程狀態。",
+          "exampleSentenceZh": "檢查製程狀態。",
+          "memoryTrick": "Process(製程) + State(狀態)＝機台五階段「製程狀態」！"
+        },
+        {
+          "id": "aoi-s2-02",
+          "word": "Wait Process",
+          "kkPhonetic": "[wet ˋprɑsɛs]",
+          "ipa": "/weɪt ˈprɑː.sɛs/",
+          "syllables": "Wait · Pro·cess",
+          "zhuyinPhonetic": "ㄨㄟˋ-ㄊㄜ ㄆㄨ-ㄌㄨㄛˊ-ㄙㄞˋ-ㄙ",
+          "taiwanPhonetic": "【 威特 · 普羅賽斯 】",
+          "singleSounds": [
+            {
+              "sound": "Wait",
+              "kk": "[wet]",
+              "zhuyin": "ㄨㄟˋ-ㄊㄜ",
+              "homophone": "威特 (等待)"
+            },
+            {
+              "sound": "Process",
+              "kk": "[ˋprɑsɛs]",
+              "zhuyin": "ㄆㄨ-ㄌㄨㄛˊ-ㄙㄞˋ-ㄙ",
+              "homophone": "普羅賽斯 (製程)"
+            }
+          ],
+          "partOfSpeech": "n.",
+          "translation": "等待製程",
+          "cleanroomContext": "基板已定位且配方就緒，等待開始檢測指令",
+          "category": "imported",
+          "isImported": true,
+          "sourceFileName": "公開光學檢測單元 2",
+          "exampleSentence": "Tool waits for process.",
+          "exampleTranslation": "機台等待製程。",
+          "exampleSentenceZh": "機台等待製程。",
+          "memoryTrick": "Wait(等待) + Process(製程)＝萬事俱備的「等待製程」！"
+        },
+        {
+          "id": "aoi-s2-03",
+          "word": "Processing",
+          "kkPhonetic": "[ˋprɑsɛsɪŋ]",
+          "ipa": "/ˈprɑː.sɛs.ɪŋ/",
+          "syllables": "Pro·cess·ing",
+          "zhuyinPhonetic": "ㄆㄨ-ㄌㄨㄛˊ-ㄙㄞˋ-ㄙ-ㄧㄥ",
+          "taiwanPhonetic": "【 普羅賽斯英 】",
+          "singleSounds": [
+            {
+              "sound": "Process",
+              "kk": "[ˋprɑsɛs]",
+              "zhuyin": "ㄆㄨ-ㄌㄨㄛˊ-ㄙㄞˋ-ㄙ",
+              "homophone": "普羅賽斯 (製程)"
+            },
+            {
+              "sound": "ing",
+              "kk": "[ɪŋ]",
+              "zhuyin": "ㄧㄥ",
+              "homophone": "英 (進行中)"
+            }
+          ],
+          "partOfSpeech": "n./adj.",
+          "translation": "製程中",
+          "cleanroomContext": "機台正高速移動光學鏡頭進行自動掃描與演算法比對",
+          "category": "imported",
+          "isImported": true,
+          "sourceFileName": "公開光學檢測單元 2",
+          "exampleSentence": "The tool is processing.",
+          "exampleTranslation": "機台正在檢測中。",
+          "exampleSentenceZh": "機台正在檢測中。",
+          "memoryTrick": "Process + ing(正在進行)＝機台正在跑片「製程中」！"
+        },
+        {
+          "id": "aoi-s2-04",
+          "word": "PLC Status",
+          "kkPhonetic": "[ˋpi ˋɛl ˋsi ˋstetəs]",
+          "ipa": "/ˌpiː.ɛlˈsiː ˈsteɪ.təs/",
+          "syllables": "P·L·C · Sta·tus",
+          "zhuyinPhonetic": "ㄆㄧ-ㄞ-ㄡ-ㄒㄧ ㄙ-ㄊㄟˋ-ㄊㄜ-ㄙ",
+          "taiwanPhonetic": "【 批艾歐西 · 斯泰特斯 】",
+          "singleSounds": [
+            {
+              "sound": "PLC",
+              "kk": "[ˋpi ˋɛl ˋsi]",
+              "zhuyin": "ㄆㄧ-ㄞ-ㄡ-ㄒㄧ",
+              "homophone": "批艾歐西 (控制器)"
+            },
+            {
+              "sound": "Status",
+              "kk": "[ˋstetəs]",
+              "zhuyin": "ㄙ-ㄊㄟˋ-ㄊㄜ-ㄙ",
+              "homophone": "斯泰特斯 (狀態)"
+            }
+          ],
+          "partOfSpeech": "n.",
+          "translation": "PLC 控制器狀態",
+          "cleanroomContext": "可程式邏輯控制器與氣壓閥、安全門鎖、馬達驅動器之連線狀態",
+          "category": "imported",
+          "isImported": true,
+          "sourceFileName": "公開光學檢測單元 2",
+          "exampleSentence": "Check the PLC status.",
+          "exampleTranslation": "檢查控制器狀態。",
+          "exampleSentenceZh": "檢查控制器狀態。",
+          "memoryTrick": "PLC(可程式控制器) + Status(狀態)＝硬體電控「PLC 狀態」！"
+        },
+        {
+          "id": "aoi-s2-05",
+          "word": "Control State",
+          "kkPhonetic": "[kənˋtrol stet]",
+          "ipa": "/kənˈtroʊl steɪt/",
+          "syllables": "Con·trol · State",
+          "zhuyinPhonetic": "ㄎㄣ-ㄔㄨㄛ ㄙ-ㄊㄟˋ-ㄊㄜ",
+          "taiwanPhonetic": "【 肯綽 · 斯泰特 】",
+          "singleSounds": [
+            {
+              "sound": "Control",
+              "kk": "[kənˋtrol]",
+              "zhuyin": "ㄎㄣ-ㄔㄨㄛ",
+              "homophone": "肯綽 (控制)"
+            },
+            {
+              "sound": "State",
+              "kk": "[stet]",
+              "zhuyin": "ㄙ-ㄊㄟˋ-ㄊㄜ",
+              "homophone": "斯泰特 (狀態)"
+            }
+          ],
+          "partOfSpeech": "n.",
+          "translation": "連線控制狀態",
+          "cleanroomContext": "機台與工廠自動化系統的連線控制權狀態（Remote 遠端 / Local 近端 / Offline 離線）",
+          "category": "imported",
+          "isImported": true,
+          "sourceFileName": "公開光學檢測單元 2",
+          "exampleSentence": "Set remote mode.",
+          "exampleTranslation": "設定遠端模式。",
+          "exampleSentenceZh": "設定遠端模式。",
+          "memoryTrick": "Control State(連線控制狀態)＝量產必切 Remote（遠端）！"
+        },
+        {
+          "id": "aoi-s3-01",
+          "word": "Alarm Log",
+          "kkPhonetic": "[əˋlɑrm lɔg]",
+          "ipa": "/əˈlɑːrm lɔːɡ/",
+          "syllables": "A·larm · Log",
+          "zhuyinPhonetic": "ㄜ-ㄌㄚˇ-ㄇㄨ ㄌㄨㄛˋ-ㄍㄜˊ",
+          "taiwanPhonetic": "【 額拉姆 · 洛格 】",
+          "singleSounds": [
+            {
+              "sound": "Alarm",
+              "kk": "[əˋlɑrm]",
+              "zhuyin": "ㄜ-ㄌㄚˇ-ㄇㄨ",
+              "homophone": "額拉姆 (警報)"
+            },
+            {
+              "sound": "Log",
+              "kk": "[lɔg]",
+              "zhuyin": "ㄌㄨㄛˋ-ㄍㄜˊ",
+              "homophone": "洛格 (日誌)"
+            }
+          ],
+          "partOfSpeech": "n.",
+          "translation": "警報日誌",
+          "cleanroomContext": "記錄機台歷史故障代碼與發生時間的警報日誌",
+          "category": "imported",
+          "isImported": true,
+          "sourceFileName": "公開光學檢測單元 3",
+          "exampleSentence": "Check the alarm log.",
+          "exampleTranslation": "檢查警報日誌。",
+          "exampleSentenceZh": "檢查警報日誌。",
+          "memoryTrick": "Alarm(警報) + Log(紀錄)＝追查當機原因必看的「警報日誌」！"
+        },
+        {
+          "id": "aoi-s3-02",
+          "word": "Auto Focus Log",
+          "kkPhonetic": "[ˋɔto ˋfokəs lɔg]",
+          "ipa": "/ˈɔː.toʊ ˈfoʊ.kəs lɔːɡ/",
+          "syllables": "Au·to · Fo·cus · Log",
+          "zhuyinPhonetic": "ㄡ-ㄊㄡˋ ㄈㄛˊ-ㄎㄜ-ㄙ ㄌㄨㄛˋ-ㄍㄜˊ",
+          "taiwanPhonetic": "【 歐透 · 佛克斯 · 洛格 】",
+          "singleSounds": [
+            {
+              "sound": "Auto",
+              "kk": "[ˋɔto]",
+              "zhuyin": "ㄡ-ㄊㄡˋ",
+              "homophone": "歐透 (自動)"
+            },
+            {
+              "sound": "Focus",
+              "kk": "[ˋfokəs]",
+              "zhuyin": "ㄈㄛˊ-ㄎㄜ-ㄙ",
+              "homophone": "佛克斯 (對焦)"
+            },
+            {
+              "sound": "Log",
+              "kk": "[lɔg]",
+              "zhuyin": "ㄌㄨㄛˋ-ㄍㄜˊ",
+              "homophone": "洛格 (紀錄)"
+            }
+          ],
+          "partOfSpeech": "n.",
+          "translation": "自動對焦紀錄",
+          "cleanroomContext": "記錄雷射或光學鏡頭自動對焦補償數值的歷史日誌",
+          "category": "imported",
+          "isImported": true,
+          "sourceFileName": "公開光學檢測單元 3",
+          "exampleSentence": "Open the focus log.",
+          "exampleTranslation": "開啟對焦紀錄。",
+          "exampleSentenceZh": "開啟對焦紀錄。",
+          "memoryTrick": "Auto Focus(自動對焦) + Log(紀錄)＝拍不清楚時先查「自動對焦紀錄」！"
+        },
+        {
+          "id": "aoi-s3-03",
+          "word": "Motion Roller Log",
+          "kkPhonetic": "[ˋmoʃən ˋrolɚ lɔg]",
+          "ipa": "/ˈmoʊ.ʃən ˈroʊ.lər lɔːɡ/",
+          "syllables": "Mo·tion · Rol·ler · Log",
+          "zhuyinPhonetic": "ㄇㄛˋ-ㄒㄩㄢ ㄌㄨㄛˊ-ㄌㄜˋ ㄌㄨㄛˋ-ㄍㄜˊ",
+          "taiwanPhonetic": "【 莫宣 · 羅勒 · 洛格 】",
+          "singleSounds": [
+            {
+              "sound": "Motion",
+              "kk": "[ˋmoʃən]",
+              "zhuyin": "ㄇㄛˋ-ㄒㄩㄢ",
+              "homophone": "莫宣 (運動)"
+            },
+            {
+              "sound": "Roller",
+              "kk": "[ˋrolɚ]",
+              "zhuyin": "ㄌㄨㄛˊ-ㄌㄜˋ",
+              "homophone": "羅勒 (滾輪)"
+            },
+            {
+              "sound": "Log",
+              "kk": "[lɔg]",
+              "zhuyin": "ㄌㄨㄛˋ-ㄍㄜˊ",
+              "homophone": "洛格 (日誌)"
+            }
+          ],
+          "partOfSpeech": "n.",
+          "translation": "滾輪傳動日誌",
+          "cleanroomContext": "記錄基板傳送軌道滾輪與伺服軸運動狀態的日誌",
+          "category": "imported",
+          "isImported": true,
+          "sourceFileName": "公開光學檢測單元 3",
+          "exampleSentence": "Check the roller log.",
+          "exampleTranslation": "檢查滾輪日誌。",
+          "exampleSentenceZh": "檢查滾輪日誌。",
+          "memoryTrick": "Motion(運動) + Roller(滾輪) + Log(紀錄)＝卡板時必查的「滾輪傳動日誌」！"
+        },
+        {
+          "id": "aoi-s3-04",
+          "word": "Sucker Manager",
+          "kkPhonetic": "[ˋsʌkɚ ˋmænɪdʒɚ]",
+          "ipa": "/ˈsʌk.ər ˈmæn.ɪ.dʒər/",
+          "syllables": "Suck·er · Man·a·ger",
+          "zhuyinPhonetic": "ㄙㄚˋ-ㄎㄜ ㄇㄞˋ-ㄋㄧ-ㄐㄩ-ㄦ",
+          "taiwanPhonetic": "【 薩克 · 麥尼居爾 】",
+          "singleSounds": [
+            {
+              "sound": "Sucker",
+              "kk": "[ˋsʌkɚ]",
+              "zhuyin": "ㄙㄚˋ-ㄎㄜ",
+              "homophone": "薩克 (真空吸嘴)"
+            },
+            {
+              "sound": "Manager",
+              "kk": "[ˋmænɪdʒɚ]",
+              "zhuyin": "ㄇㄞˋ-ㄋㄧ-ㄐㄩ-ㄦ",
+              "homophone": "麥尼居爾 (管理介面)"
+            }
+          ],
+          "partOfSpeech": "n.",
+          "translation": "吸嘴管理",
+          "cleanroomContext": "控制與監測取放手臂真空吸嘴破真空、負壓閾值與啟閉狀態的管理畫面",
+          "category": "imported",
+          "isImported": true,
+          "sourceFileName": "公開光學檢測單元 3",
+          "exampleSentence": "Check sucker manager.",
+          "exampleTranslation": "檢查吸嘴管理。",
+          "exampleSentenceZh": "檢查吸嘴管理。",
+          "memoryTrick": "Sucker(真空吸嘴) + Manager(管理員)＝吸不起基板時必看的「吸嘴管理」！"
+        },
+        {
+          "id": "aoi-s3-05",
+          "word": "Golden Sample",
+          "kkPhonetic": "[ˋgoldən ˋsæmp!]",
+          "ipa": "/ˈɡoʊl.dən ˈsæm.pəl/",
+          "syllables": "Gol·den · Sam·ple",
+          "zhuyinPhonetic": "ㄍㄡ-ㄉㄥ ㄙㄢˋ-ㄆㄛˊ",
+          "taiwanPhonetic": "【 勾登 · 散婆 】",
+          "singleSounds": [
+            {
+              "sound": "Golden",
+              "kk": "[ˋgoldən]",
+              "zhuyin": "ㄍㄡ-ㄉㄥ",
+              "homophone": "勾登 (黃金標準)"
+            },
+            {
+              "sound": "Sample",
+              "kk": "[ˋsæmp!]",
+              "zhuyin": "ㄙㄢˋ-ㄆㄛˊ",
+              "homophone": "散婆 (樣本)"
+            }
+          ],
+          "partOfSpeech": "n.",
+          "translation": "黃金樣本",
+          "cleanroomContext": "已知缺陷位置與標準特徵的基準樣品片，用於每日開機點檢驗證機台準確度",
+          "category": "imported",
+          "isImported": true,
+          "sourceFileName": "公開光學檢測單元 3",
+          "exampleSentence": "Test the golden sample.",
+          "exampleTranslation": "測試黃金樣本。",
+          "exampleSentenceZh": "測試黃金樣本。",
+          "memoryTrick": "Golden(黃金級標準) + Sample(樣品)＝開機點檢必測的「黃金樣本」！"
+        },
+        {
+          "id": "imported-vocab-1794625438469-1-substrate",
+          "word": "Substrate",
+          "partOfSpeech": "n.",
+          "translation": "基板",
+          "ipa": "/ˈsʌb.streɪt/",
+          "kkPhonetic": "[ˋsʌbstret]",
+          "syllables": "sub·strate",
+          "singleSounds": [
+            {
+              "sound": "sub",
+              "kk": "[sub]",
+              "zhuyin": "ㄙㄚˋㄅㄨˋ",
+              "homophone": "薩布"
+            },
+            {
+              "sound": "strate",
+              "kk": "[ˋstrate]",
+              "zhuyin": "ㄙㄊㄜˋㄖㄨㄟˋㄊㄜˋ",
+              "homophone": "斯特瑞特"
+            }
+          ],
+          "taiwanPhonetic": "【 薩布-斯特瑞特 】",
+          "zhuyinPhonetic": "【 ㄙㄚˋ ㄅㄨˋ ㄙ ㄘㄨㄟˋ ㄊㄜˋ 】",
+          "mandarinPhonetic": "【 薩布-斯特瑞特 】",
+          "memoryTrick": "sub(在下面)加上strate(層)，放在最底下的支撐層就是基板。",
+          "exampleSentence": "Check the substrate.",
+          "exampleTranslation": "檢查這塊基板。",
+          "exampleSentenceZh": "檢查這塊基板。",
+          "cleanroomContext": "承載晶粒與錫球的封裝基板，AOI 核心檢測對象。",
+          "category": "imported",
+          "sourceFileName": "IMG_1663.JPG 等 4 張照片",
+          "isImported": true
+        },
+        {
+          "id": "imported-vocab-1794625438470-2-trigger",
+          "word": "Trigger",
+          "partOfSpeech": "v.",
+          "translation": "觸發",
+          "ipa": "/trig.ger/",
+          "kkPhonetic": "[ˋtrɪgɚ]",
+          "syllables": "trig·ger",
+          "singleSounds": [
+            {
+              "sound": "trig",
+              "kk": "[trig]",
+              "zhuyin": "垂",
+              "homophone": "垂"
+            },
+            {
+              "sound": "ger",
+              "kk": "[gɚ]",
+              "zhuyin": "ㄍㄜˊ",
+              "homophone": "格"
+            }
+          ],
+          "taiwanPhonetic": "【 垂-格 】",
+          "zhuyinPhonetic": "【 ㄔㄨㄟ ㄍㄜˊ 】",
+          "mandarinPhonetic": "【 垂-格 】",
+          "memoryTrick": "想像扣下扳機 trigger 的瞬間，觸發訊號產生。",
+          "exampleSentence": "Trigger the camera.",
+          "exampleTranslation": "觸發相機取像。",
+          "exampleSentenceZh": "觸發相機取像。",
+          "cleanroomContext": "從個人導入資料擷取的高頻實戰單字。",
+          "category": "imported",
+          "sourceFileName": "IMG_1663.JPG 等 4 張照片",
+          "isImported": true
+        },
+        {
+          "id": "imported-vocab-1794625438471-3-recipe",
+          "word": "Recipe",
+          "partOfSpeech": "n.",
+          "translation": "參數設定",
+          "ipa": "/rec.i.pe/",
+          "kkPhonetic": "[ˋrɛsəpi]",
+          "syllables": "rec·i·pe",
+          "singleSounds": [
+            {
+              "sound": "rec",
+              "kk": "[rek]",
+              "zhuyin": "ㄖㄨㄟˋ",
+              "homophone": "瑞"
+            },
+            {
+              "sound": "i",
+              "kk": "[aɪ]",
+              "zhuyin": "ㄙㄜˋ",
+              "homophone": "色"
+            },
+            {
+              "sound": "pe",
+              "kk": "[pe]",
+              "zhuyin": "ㄆㄧˇ",
+              "homophone": "匹"
+            }
+          ],
+          "taiwanPhonetic": "【 瑞-色-匹 】",
+          "zhuyinPhonetic": "【 ㄖㄨㄟˋ ㄙㄜˋ ㄆㄧ 】",
+          "mandarinPhonetic": "【 瑞-色-匹 】",
+          "memoryTrick": "工程師的食譜，照著 recipe 跑出一樣的製程。",
+          "exampleSentence": "Load the recipe.",
+          "exampleTranslation": "載入參數設定。",
+          "exampleSentenceZh": "載入參數設定。",
+          "cleanroomContext": "包含氣體配比、腔壓、電漿射頻功率 與時間之製程程式。",
+          "category": "imported",
+          "sourceFileName": "IMG_1663.JPG 等 4 張照片",
+          "isImported": true
+        },
+        {
+          "id": "imported-vocab-1794625438471-4-sensor",
+          "word": "Sensor",
+          "partOfSpeech": "n.",
+          "translation": "感測器",
+          "ipa": "/ˈsen.sər/",
+          "kkPhonetic": "[ˋsɛnsɚ]",
+          "syllables": "sen·sor",
+          "singleSounds": [
+            {
+              "sound": "sen",
+              "kk": "[sen]",
+              "zhuyin": "仙",
+              "homophone": "仙"
+            },
+            {
+              "sound": "sor",
+              "kk": "[sɚ]",
+              "zhuyin": "ㄙㄜˋ",
+              "homophone": "瑟"
+            }
+          ],
+          "taiwanPhonetic": "【 仙-瑟 】",
+          "zhuyinPhonetic": "【 ㄕㄢ ㄙㄜˋ 】",
+          "mandarinPhonetic": "【 仙-瑟 】",
+          "memoryTrick": "零件很有 sense 會感覺，就是感測器。",
+          "exampleSentence": "Reset the sensor.",
+          "exampleTranslation": "重設感測器。",
+          "exampleSentenceZh": "重設感測器。",
+          "cleanroomContext": "光纖感應器、晶圓在席檢知。",
+          "category": "imported",
+          "sourceFileName": "IMG_1663.JPG 等 4 張照片",
+          "isImported": true
+        },
+        {
+          "id": "imported-vocab-1794625438472-5-status",
+          "word": "Status",
+          "partOfSpeech": "n.",
+          "translation": "狀態",
+          "ipa": "/sta.tus/",
+          "kkPhonetic": "[ˋstetəs]",
+          "syllables": "sta·tus",
+          "singleSounds": [
+            {
+              "sound": "sta",
+              "kk": "[sta]",
+              "zhuyin": "史ㄉㄧㄝ",
+              "homophone": "史爹"
+            },
+            {
+              "sound": "tus",
+              "kk": "[tus]",
+              "zhuyin": "ㄊㄜˋㄙ",
+              "homophone": "特斯"
+            }
+          ],
+          "taiwanPhonetic": "【 史爹-特斯 】",
+          "zhuyinPhonetic": "【 ㄙ ㄊㄞˋ ㄊㄜˋ ㄙ 】",
+          "mandarinPhonetic": "【 史爹-特斯 】",
+          "memoryTrick": "Stay(待)在tus(這)，顯示目前待命的狀態。",
+          "exampleSentence": "Check machine status.",
+          "exampleTranslation": "檢查機器狀態。",
+          "exampleSentenceZh": "檢查機器狀態。",
+          "cleanroomContext": "從個人導入資料擷取的高頻實戰單字。",
+          "category": "imported",
+          "sourceFileName": "IMG_1663.JPG 等 4 張照片",
+          "isImported": true
+        },
+        {
+          "id": "imported-vocab-1794625438473-7-initial",
+          "word": "Initial",
+          "partOfSpeech": "v.",
+          "translation": "初始化",
+          "ipa": "/i.ni.tial/",
+          "kkPhonetic": "[ɪˋnɪʃəl]",
+          "syllables": "i·ni·tial",
+          "singleSounds": [
+            {
+              "sound": "i",
+              "kk": "[aɪ]",
+              "zhuyin": "ㄧ",
+              "homophone": "依"
+            },
+            {
+              "sound": "ni",
+              "kk": "[ni]",
+              "zhuyin": "ㄋㄧˊ",
+              "homophone": "尼"
+            },
+            {
+              "sound": "tial",
+              "kk": "[tial]",
+              "zhuyin": "ㄒㄧㄡ",
+              "homophone": "秀"
+            }
+          ],
+          "taiwanPhonetic": "【 依-尼-秀 】",
+          "zhuyinPhonetic": "【 ㄧ ㄋㄧˊ ㄒㄧㄡ 】",
+          "mandarinPhonetic": "【 依-尼-秀 】",
+          "memoryTrick": "in(進去)跟開始結合，表示機台剛啟動的準備。",
+          "exampleSentence": "Initial the system.",
+          "exampleTranslation": "系統初始化。",
+          "exampleSentenceZh": "系統初始化。",
+          "cleanroomContext": "半導體無塵室工程術語 / 常用語境單字，點擊可聆聽標準發音。",
+          "category": "imported",
+          "sourceFileName": "IMG_1663.JPG 等 4 張照片",
+          "isImported": true
+        },
+        {
+          "id": "imported-vocab-1794242554526-0-process",
+          "word": "Process",
+          "partOfSpeech": "n.",
+          "translation": "製程/程序",
+          "ipa": "/pro.cess/",
+          "syllables": "pro·cess",
+          "singleSounds": [
+            {
+              "sound": "pro",
+              "zhuyin": "ㄆㄨˇ",
+              "homophone": "普羅塞斯",
+              "kk": "[pro]"
+            },
+            {
+              "sound": "cess",
+              "zhuyin": "若",
+              "homophone": "克欸斯斯",
+              "kk": "[sess]"
+            }
+          ],
+          "taiwanPhonetic": "【 普-若-ㄙㄟ-斯 】",
+          "zhuyinPhonetic": "【 ㄆㄨˇ 若 ㄙㄟ ㄙ 】",
+          "mandarinPhonetic": "【 普羅塞斯 】",
+          "memoryTrick": "Pro (專業的) cess (程序)，專業的程序一定要遵守。",
+          "exampleSentence": "The process is starting.",
+          "exampleTranslation": "製程正在開始。",
+          "exampleSentenceZh": "製程正在開始。",
+          "cleanroomContext": "從您導入的個人工作照片/檔案中擷取的高關聯度英文單音字彙。",
+          "category": "imported",
+          "isImported": true,
+          "sourceFileName": "IMG_1657.JPG",
+          "kkPhonetic": "[ˋprɑsɛs]"
+        },
+        {
+          "id": "imported-vocab-1794242554527-2-control",
+          "word": "Control",
+          "partOfSpeech": "n./v.",
+          "translation": "控制",
+          "ipa": "/kənˈtroʊl/",
+          "syllables": "con·trol",
+          "singleSounds": [
+            {
+              "sound": "con",
+              "zhuyin": "ㄎㄤ",
+              "homophone": "肯綽",
+              "kk": "[kon]"
+            },
+            {
+              "sound": "trol",
+              "zhuyin": "ㄊㄜˋ",
+              "homophone": "特瑞歐勒",
+              "kk": "[trol]"
+            }
+          ],
+          "taiwanPhonetic": "【 康-特-羅 】",
+          "zhuyinPhonetic": "【 ㄎㄤ ㄊㄜˋ ㄌㄨㄛˊ 】",
+          "mandarinPhonetic": "【 肯綽 】",
+          "memoryTrick": "Con (看) trol (頭)，看準源頭才能精準控制。",
+          "exampleSentence": "Check the control state.",
+          "exampleTranslation": "檢查控制狀態。",
+          "exampleSentenceZh": "檢查控制狀態。",
+          "cleanroomContext": "從您導入的個人工作照片/檔案中擷取的高關聯度英文單音字彙。",
+          "category": "imported",
+          "isImported": true,
+          "sourceFileName": "IMG_1657.JPG",
+          "kkPhonetic": "[kənˋtrol]"
+        },
+        {
+          "id": "imported-vocab-1794242554528-3-remote",
+          "word": "Remote",
+          "partOfSpeech": "adj.",
+          "translation": "遠端的",
+          "ipa": "/re.mote/",
+          "syllables": "re·mote",
+          "singleSounds": [
+            {
+              "sound": "re",
+              "zhuyin": "芮",
+              "homophone": "瑞欸姆歐特欸",
+              "kk": "[re]"
+            },
+            {
+              "sound": "mote",
+              "zhuyin": "ㄇㄛ",
+              "homophone": "姆歐特欸",
+              "kk": "[mote]"
+            }
+          ],
+          "taiwanPhonetic": "【 芮-摸-特 】",
+          "zhuyinPhonetic": "【 芮 ㄇㄛ ㄊㄜˋ 】",
+          "mandarinPhonetic": "【 瑞欸姆歐特欸 】",
+          "memoryTrick": "Re (重複) mote (摸不到)，遠端控制就是手摸不到機台。",
+          "exampleSentence": "Switch to remote mode.",
+          "exampleTranslation": "切換到遠端模式。",
+          "exampleSentenceZh": "切換到遠端模式。",
+          "cleanroomContext": "半導體無塵室工程術語 / 常用語境單字，點擊可聆聽標準發音。",
+          "category": "imported",
+          "isImported": true,
+          "sourceFileName": "IMG_1657.JPG",
+          "kkPhonetic": "[rɪˋmot]"
+        },
+        {
+          "id": "imported-vocab-1794242554529-4-wafer",
+          "word": "Wafer",
+          "partOfSpeech": "n.",
+          "translation": "晶圓",
+          "ipa": "/ˈweɪ.fər/",
+          "syllables": "wa·fer",
+          "singleSounds": [
+            {
+              "sound": "wa",
+              "zhuyin": "ㄨㄟ",
+              "homophone": "威弗",
+              "kk": "[wa]"
+            },
+            {
+              "sound": "fer",
+              "zhuyin": "ㄈㄨˊ",
+              "homophone": "夫爾",
+              "kk": "[fɚ]"
+            }
+          ],
+          "taiwanPhonetic": "【 威-福 】",
+          "zhuyinPhonetic": "【 ㄨㄟ ㄈㄨˊ 】",
+          "mandarinPhonetic": "【 威弗 】",
+          "memoryTrick": "Wa (威) fer (風)，在半導體業晶圓最威風。",
+          "exampleSentence": "No wafer in chamber.",
+          "exampleTranslation": "反應室內沒有晶圓。",
+          "exampleSentenceZh": "反應室內沒有晶圓。",
+          "cleanroomContext": "8吋或12吋高純度單晶矽晶圓片。",
+          "category": "imported",
+          "isImported": true,
+          "sourceFileName": "IMG_1657.JPG",
+          "kkPhonetic": "[ˋwefɚ]"
+        },
+        {
+          "id": "imported-vocab-1794242507125-0-analysis",
+          "word": "Analysis",
+          "partOfSpeech": "n.",
+          "translation": "分析",
+          "ipa": "/a.nal.y.sis/",
+          "syllables": "a·nal·y·sis",
+          "singleSounds": [
+            {
+              "sound": "a",
+              "zhuyin": "ㄜˊ",
+              "homophone": "阿恩阿勒伊斯",
+              "kk": "[ə]"
+            },
+            {
+              "sound": "nal",
+              "zhuyin": "ㄋㄞˋ",
+              "homophone": "恩歐",
+              "kk": "[nal]"
+            },
+            {
+              "sound": "y",
+              "zhuyin": "哩",
+              "homophone": "伊",
+              "kk": "[ɪ]"
+            },
+            {
+              "sound": "sis",
+              "zhuyin": "夕ㄙ",
+              "homophone": "斯伊斯",
+              "kk": "[sis]"
+            }
+          ],
+          "taiwanPhonetic": "【 額-耐-哩-夕斯 】",
+          "zhuyinPhonetic": "【 ㄜˊ ㄋㄞˋ 哩 夕ㄙ 】",
+          "mandarinPhonetic": "【 阿恩阿勒伊斯 】",
+          "memoryTrick": "「額」 的「耐」 力要好，才能完成精密「分析」。",
+          "exampleSentence": "Run the AOI analysis.",
+          "exampleTranslation": "執行 AOI 分析。",
+          "exampleSentenceZh": "執行 AOI 分析。",
+          "cleanroomContext": "半導體無塵室工程術語 / 常用語境單字，點擊可聆聽標準發音。",
+          "category": "imported",
+          "isImported": true,
+          "sourceFileName": "IMG_1658.JPG",
+          "kkPhonetic": "[analysis]"
+        },
+        {
+          "id": "imported-vocab-1794242507126-1-manual",
+          "word": "Manual",
+          "partOfSpeech": "adj.",
+          "translation": "手動的",
+          "ipa": "/man.u.al/",
+          "syllables": "man·u·al",
+          "singleSounds": [
+            {
+              "sound": "man",
+              "zhuyin": "ㄇㄢˋ",
+              "homophone": "曼紐爾",
+              "kk": "[man]"
+            },
+            {
+              "sound": "u",
+              "zhuyin": "ㄋㄧㄡˇ",
+              "homophone": "優",
+              "kk": "[u]"
+            },
+            {
+              "sound": "al",
+              "zhuyin": "喔",
+              "homophone": "歐",
+              "kk": "[al]"
+            }
+          ],
+          "taiwanPhonetic": "【 曼-紐-喔 】",
+          "zhuyinPhonetic": "【 ㄇㄢˋ ㄋㄧㄡˇ 喔 】",
+          "mandarinPhonetic": "【 曼紐爾 】",
+          "memoryTrick": "「曼」 妙的手「紐」 動開關，切換成「手動」。",
+          "exampleSentence": "Switch to manual mode.",
+          "exampleTranslation": "切換到手動模式。",
+          "exampleSentenceZh": "切換到手動模式。",
+          "cleanroomContext": "從您導入的個人工作照片/檔案中擷取的高關聯度英文單音字彙。",
+          "category": "imported",
+          "isImported": true,
+          "sourceFileName": "IMG_1658.JPG",
+          "kkPhonetic": "[manual]"
+        },
+        {
+          "id": "imported-vocab-1794242507129-4-hardware",
+          "word": "Hardware",
+          "partOfSpeech": "n.",
+          "translation": "硬體",
+          "ipa": "/hard.ware/",
+          "syllables": "hard·ware",
+          "singleSounds": [
+            {
+              "sound": "hard",
+              "zhuyin": "ㄏㄚ",
+              "homophone": "赫阿瑞德威阿",
+              "kk": "[hard]"
+            },
+            {
+              "sound": "ware",
+              "zhuyin": "ㄉㄜ˙",
+              "homophone": "威阿瑞欸",
+              "kk": "[ware]"
+            }
+          ],
+          "taiwanPhonetic": "【 哈-德-威-爾 】",
+          "zhuyinPhonetic": "【 ㄏㄚ ㄉㄜ˙ ㄨㄟ ㄦˇ 】",
+          "mandarinPhonetic": "【 赫阿瑞德威阿 】",
+          "memoryTrick": "「哈」 氣讓「德」 國生產的「硬體」發「威」。",
+          "exampleSentence": "Complete the hardware setup.",
+          "exampleTranslation": "完成硬體設定。",
+          "exampleSentenceZh": "完成硬體設定。",
+          "cleanroomContext": "半導體無塵室工程術語 / 常用語境單字，點擊可聆聽標準發音。",
+          "category": "imported",
+          "isImported": true,
+          "sourceFileName": "IMG_1658.JPG",
+          "kkPhonetic": "[hardware]"
+        },
+        {
+          "id": "imported-vocab-1794242507130-5-position",
+          "word": "Position",
+          "partOfSpeech": "n.",
+          "translation": "位置",
+          "ipa": "/po.si.tion/",
+          "syllables": "po·si·tion",
+          "singleSounds": [
+            {
+              "sound": "po",
+              "zhuyin": "ㄆㄛˊ",
+              "homophone": "珀西遜",
+              "kk": "[po]"
+            },
+            {
+              "sound": "si",
+              "zhuyin": "ㄌㄧˋ",
+              "homophone": "斯伊",
+              "kk": "[si]"
+            },
+            {
+              "sound": "tion",
+              "zhuyin": "ㄒㄩㄣˋ",
+              "homophone": "宣",
+              "kk": "[ʃən]"
+            }
+          ],
+          "taiwanPhonetic": "【 婆-立-遜 】",
+          "zhuyinPhonetic": "【 ㄆㄛˊ ㄌㄧˋ ㄒㄩㄣˋ 】",
+          "mandarinPhonetic": "【 珀西遜 】",
+          "memoryTrick": "「婆」 婆「立」 刻確認東西的「遜」 掉「位置」。",
+          "exampleSentence": "Check the position log.",
+          "exampleTranslation": "檢查位置紀錄檔。",
+          "exampleSentenceZh": "檢查位置紀錄檔。",
+          "cleanroomContext": "從您導入的個人工作照片/檔案中擷取的高關聯度英文單音字彙。",
+          "category": "imported",
+          "isImported": true,
+          "sourceFileName": "IMG_1658.JPG",
+          "kkPhonetic": "[position]"
+        }
+      ],
+      "importedLessons": [
+        {
+          "id": "aoi-hw-lesson-1",
+          "scenario": "公開光學檢測單元 1 · 跳晶感測器",
+          "english_sentence": "Check the jump sensor.",
+          "chinese_translation": "檢查跳晶感測器。",
+          "components": {
+            "subject": "We (我們)",
+            "action": "check (檢查)",
+            "bridge": "the (這顆)",
+            "object": "jump sensor (跳晶感測器)."
+          },
+          "phonetic_taiwan": "【 柴克 ｜ 惹 ｜ 醬普 ｜ 森瑟 】",
+          "memory_trick": "4字極簡句：Check(檢查) + the + jump sensor(跳晶感測器)！",
+          "additional_context": "極簡 4 字句：Check + the + jump sensor",
+          "category": "custom-imported"
+        },
+        {
+          "id": "aoi-hw-lesson-2",
+          "scenario": "公開光學檢測單元 1 · JIG 定位治具板",
+          "english_sentence": "Place the JIG board.",
+          "chinese_translation": "放置 JIG 定位治具板。",
+          "components": {
+            "subject": "We (我們)",
+            "action": "place (放置)",
+            "bridge": "the (這塊)",
+            "object": "JIG board (JIG定位治具板)."
+          },
+          "phonetic_taiwan": "【 普雷斯 ｜ 惹 ｜ 吉格 ｜ 博德 】",
+          "memory_trick": "4字極簡句：Place(放置) + the + JIG board(定位治具板)！",
+          "additional_context": "極簡 4 字句：Place + the + JIG board",
+          "category": "custom-imported"
+        },
+        {
+          "id": "aoi-hw-lesson-3",
+          "scenario": "公開光學檢測單元 1 · 調整光源与啟動檢測",
+          "english_sentence": "We tune the light.",
+          "chinese_translation": "我們調整光源。",
+          "components": {
+            "subject": "We (我們)",
+            "action": "tune (調整)",
+            "bridge": "the (這組)",
+            "object": "light (光源)."
+          },
+          "phonetic_taiwan": "【 威 ｜ 圖恩 ｜ 惹 ｜ 賴特 】",
+          "memory_trick": "4字極簡句：We(我們) + tune(調整) + the light(光源)，對應 Tuning Light！",
+          "additional_context": "極簡 4 字句：We + tune + the light",
+          "category": "custom-imported"
+        },
+        {
+          "id": "aoi-hw-lesson-4",
+          "scenario": "公開光學檢測單元 1 · 檢測教導設定",
+          "english_sentence": "Run inspection teach.",
+          "chinese_translation": "執行檢測教導。",
+          "components": {
+            "subject": "We (我們)",
+            "action": "run (執行)",
+            "bridge": "the (這項)",
+            "object": "inspection teach (檢測教導)."
+          },
+          "phonetic_taiwan": "【 潤 ｜ 因斯佩克宣 ｜ 替取 】",
+          "memory_trick": "3字極簡句：Run(執行) + inspection teach(檢測教導)！",
+          "additional_context": "極簡 3 字句：Run + inspection teach",
+          "category": "custom-imported"
+        },
+        {
+          "id": "aoi-hw-lesson-5",
+          "scenario": "公開光學檢測單元 1 · 定位與模板轉換",
+          "english_sentence": "We align the layout.",
+          "chinese_translation": "我們對準定位模板。",
+          "components": {
+            "subject": "We (我們)",
+            "action": "align (定位對準)",
+            "bridge": "the (這張)",
+            "object": "layout (模板)."
+          },
+          "phonetic_taiwan": "【 威 ｜ 額賴恩 ｜ 惹 ｜ 雷奧特 】",
+          "memory_trick": "4字極簡句：同時學會 Align(定位) 與 Layout(模板)！",
+          "additional_context": "極簡 4 字句：We + align + the layout",
+          "category": "custom-imported"
+        },
+        {
+          "id": "aoi-hw-lesson-6",
+          "scenario": "公開光學檢測單元 1 · 二維條碼與搜索無目標",
+          "english_sentence": "Scan the 2D code.",
+          "chinese_translation": "掃描二維條碼。",
+          "components": {
+            "subject": "We (我們)",
+            "action": "scan (掃描)",
+            "bridge": "the (這個)",
+            "object": "2D code (二維條碼)."
+          },
+          "phonetic_taiwan": "【 斯干 ｜ 惹 ｜ 兔迪 ｜ 扣得 】",
+          "memory_trick": "4字極簡句：Scan(掃描) + the + 2D code(二維條碼)！",
+          "additional_context": "極簡 4 字句：Scan + the + 2D code",
+          "category": "custom-imported"
+        },
+        {
+          "id": "aoi-hw-lesson-7",
+          "scenario": "公開光學檢測單元 1 · 基板與錫球檢測",
+          "english_sentence": "Check the C4 bumps.",
+          "chinese_translation": "檢查覆晶錫球。",
+          "components": {
+            "subject": "We (我們)",
+            "action": "check (檢查)",
+            "bridge": "the (這些)",
+            "object": "C4 bumps (覆晶錫球)."
+          },
+          "phonetic_taiwan": "【 柴克 ｜ 惹 ｜ 西佛 ｜ 棒普斯 】",
+          "memory_trick": "4字極簡句：Check(檢查) + the + C4 bumps(錫球)！",
+          "additional_context": "極簡 4 字句：Check + the + C4 bumps",
+          "category": "custom-imported"
+        },
+        {
+          "id": "aoi-hw-lesson-8",
+          "scenario": "公開光學檢測單元 1 · 晶粒與複數晶粒檢測",
+          "english_sentence": "Check the couple dies.",
+          "chinese_translation": "檢查複數晶粒。",
+          "components": {
+            "subject": "We (我們)",
+            "action": "check (檢查)",
+            "bridge": "the (這組)",
+            "object": "couple dies (複數晶粒)."
+          },
+          "phonetic_taiwan": "【 柴克 ｜ 惹 ｜ 卡婆 ｜ 戴茲 】",
+          "memory_trick": "4字極簡句：Check(檢查) + the + couple dies(複數晶粒)！",
+          "additional_context": "極簡 4 字句：Check + the + couple dies",
+          "category": "custom-imported"
+        },
+        {
+          "id": "aoi-hw-lesson-9",
+          "scenario": "公開光學檢測單元 1 · 底膠與被動元件檢測",
+          "english_sentence": "Check the underfill.",
+          "chinese_translation": "檢查底膠狀態。",
+          "components": {
+            "subject": "We (我們)",
+            "action": "check (檢查)",
+            "bridge": "the (這層)",
+            "object": "underfill (底膠)."
+          },
+          "phonetic_taiwan": "【 柴克 ｜ 惹 ｜ 安德菲爾 】",
+          "memory_trick": "3字極簡句：Check(檢查) + the + underfill(底膠)！",
+          "additional_context": "極簡 3 字句：Check + the + underfill",
+          "category": "custom-imported"
+        },
+        {
+          "id": "aoi-hw-lesson-10",
+          "scenario": "公開光學檢測單元 1 · 散熱片、字元與銅墊檢測",
+          "english_sentence": "Inspect the Cu pad.",
+          "chinese_translation": "檢測基板銅墊。",
+          "components": {
+            "subject": "We (我們)",
+            "action": "inspect (檢測)",
+            "bridge": "the (這塊)",
+            "object": "Cu pad (銅墊)."
+          },
+          "phonetic_taiwan": "【 因斯佩克特 ｜ 惹 ｜ 卡珀 ｜ 派德 】",
+          "memory_trick": "4字極簡句：Inspect(檢測) + the + Cu pad(銅墊)！",
+          "additional_context": "極簡 4 字句：Inspect + the + Cu pad",
+          "category": "custom-imported"
+        },
+        {
+          "id": "aoi-hw-lesson-11",
+          "scenario": "公開光學檢測單元 2 · 檢查控制器與連線狀態",
+          "english_sentence": "Check the PLC status.",
+          "chinese_translation": "檢查控制器狀態。",
+          "components": {
+            "subject": "We (我們)",
+            "action": "check (檢查)",
+            "bridge": "the (這項)",
+            "object": "PLC status (控制器狀態)."
+          },
+          "phonetic_taiwan": "【 柴克 ｜ 惹 ｜ 批艾歐西 ｜ 斯泰特斯 】",
+          "memory_trick": "4字極簡句：Check + the + PLC status！",
+          "additional_context": "極簡 4 字句：Check + the + PLC status",
+          "category": "custom-imported"
+        },
+        {
+          "id": "aoi-hw-lesson-12",
+          "scenario": "公開光學檢測單元 3 · 測試黃金標準樣品",
+          "english_sentence": "Test the golden sample.",
+          "chinese_translation": "測試黃金樣本。",
+          "components": {
+            "subject": "We (我們)",
+            "action": "test (測試)",
+            "bridge": "the (這片)",
+            "object": "golden sample (黃金樣本)."
+          },
+          "phonetic_taiwan": "【 泰斯特 ｜ 惹 ｜ 勾登 ｜ 散婆 】",
+          "memory_trick": "4字極簡句：Test + the + golden sample！",
+          "additional_context": "極簡 4 字句：Test + the + golden sample",
+          "category": "custom-imported"
+        },
+        {
+          "id": "imported-lesson-1794625438474-0",
+          "scenario": "調整光源強度",
+          "english_sentence": "Tune the light.",
+          "chinese_translation": "調整光源。",
+          "components": {
+            "subject": "Tune (👤 調諧)",
+            "action": "the (🏃‍♂️ 這)",
+            "object": "light. (📦 關鍵目標)",
+            "bridge": "the (🌉 橋樑)"
+          },
+          "phonetic_taiwan": "【 圖恩 ｜ 得 ｜ 勒伊格赫特 】",
+          "memory_trick": "無塵室實戰口訣：先抓主角「Tune」，接著做動作「the」，鎖定目標「light.」，諧音連讀 【 圖恩 ｜ 得 ｜ 勒伊格赫特 】 一口氣完成交接！",
+          "category": "custom-imported",
+          "additional_context": "擷取自「IMG_1663.JPG 等 4 張照片」專屬英文內容。",
+          "practiceQuestions": [
+            {
+              "id": "imp-q-1794625438474-0-1",
+              "question": "【導入句實戰 1/2】在「Tune the light.」中，代表『動作 (V)』的核心單字是？",
+              "options": [
+                "cancel",
+                "forget",
+                "ignore",
+                "the"
+              ],
+              "correctIndex": 3,
+              "explanation": "正確答案為「the」。掌握主角 + 動作即可快速完成無塵室口報。"
+            },
+            {
+              "id": "imp-q-1794625438483-0-2",
+              "question": "【導入句實戰 2/2】若要表達「調整光源。」，正確的英文句型為？",
+              "options": [
+                "Tune the light.",
+                "Nothing is ready for light..",
+                "Wait tomorrow shift check.",
+                "System unknown error now."
+              ],
+              "correctIndex": 0,
+              "explanation": "正確句型為「Tune the light.」（調整光源。）。"
+            }
+          ]
+        },
+        {
+          "id": "imported-lesson-1794625438484-1",
+          "scenario": "停止載入作業",
+          "english_sentence": "Stop the load.",
+          "chinese_translation": "停止載入。",
+          "components": {
+            "subject": "Stop (👤 停止)",
+            "action": "the (🏃‍♂️ 這)",
+            "object": "load. (📦 關鍵目標)",
+            "bridge": "the (🌉 橋樑)"
+          },
+          "phonetic_taiwan": "【 斯塔普 ｜ 得 ｜ 勒歐阿德 】",
+          "memory_trick": "無塵室實戰口訣：先抓主角「Stop」，接著做動作「the」，鎖定目標「load.」，諧音連讀 【 斯塔普 ｜ 得 ｜ 勒歐阿德 】 一口氣完成交接！",
+          "category": "custom-imported",
+          "additional_context": "擷取自「IMG_1663.JPG 等 4 張照片」專屬英文內容。",
+          "practiceQuestions": [
+            {
+              "id": "imp-q-1794625438484-1-1",
+              "question": "【導入句實戰 1/2】在「Stop the load.」中，代表『動作 (V)』的核心單字是？",
+              "options": [
+                "cancel",
+                "forget",
+                "ignore",
+                "the"
+              ],
+              "correctIndex": 3,
+              "explanation": "正確答案為「the」。掌握主角 + 動作即可快速完成無塵室口報。"
+            },
+            {
+              "id": "imp-q-1794625438484-1-2",
+              "question": "【導入句實戰 2/2】若要表達「停止載入。」，正確的英文句型為？",
+              "options": [
+                "Stop the load.",
+                "Nothing is ready for load..",
+                "Wait tomorrow shift check.",
+                "System unknown error now."
+              ],
+              "correctIndex": 0,
+              "explanation": "正確句型為「Stop the load.」（停止載入。）。"
+            }
+          ]
+        },
+        {
+          "id": "imported-lesson-1794625438484-2",
+          "scenario": "執行生產流程",
+          "english_sentence": "Run the process.",
+          "chinese_translation": "執行製程。",
+          "components": {
+            "subject": "Run (👤 運轉)",
+            "action": "the (🏃‍♂️ 這)",
+            "object": "process. (📦 製程)",
+            "bridge": "the (🌉 橋樑)"
+          },
+          "phonetic_taiwan": "【 潤 ｜ 得 ｜ 普羅塞斯 】",
+          "memory_trick": "無塵室實戰口訣：先抓主角「Run」，接著做動作「the」，鎖定目標「process.」，諧音連讀 【 潤 ｜ 得 ｜ 普羅塞斯 】 一口氣完成交接！",
+          "category": "custom-imported",
+          "additional_context": "擷取自「IMG_1663.JPG 等 4 張照片」專屬英文內容。",
+          "practiceQuestions": [
+            {
+              "id": "imp-q-1794625438484-2-1",
+              "question": "【導入句實戰 1/2】在「Run the process.」中，代表『動作 (V)』的核心單字是？",
+              "options": [
+                "cancel",
+                "forget",
+                "ignore",
+                "the"
+              ],
+              "correctIndex": 3,
+              "explanation": "正確答案為「the」。掌握主角 + 動作即可快速完成無塵室口報。"
+            },
+            {
+              "id": "imp-q-1794625438484-2-2",
+              "question": "【導入句實戰 2/2】若要表達「執行製程。」，正確的英文句型為？",
+              "options": [
+                "Run the process.",
+                "Nothing is ready for process..",
+                "Wait tomorrow shift check.",
+                "System unknown error now."
+              ],
+              "correctIndex": 0,
+              "explanation": "正確句型為「Run the process.」（執行製程。）。"
+            }
+          ]
+        },
+        {
+          "id": "imported-lesson-1794625438484-3",
+          "scenario": "進行晶粒定位",
+          "english_sentence": "Align the die.",
+          "chinese_translation": "晶粒對位。",
+          "components": {
+            "subject": "Align (👤 對齊)",
+            "action": "the (🏃‍♂️ 這)",
+            "object": "die. (📦 晶粒)",
+            "bridge": "the (🌉 橋樑)"
+          },
+          "phonetic_taiwan": "【 阿賴恩 ｜ 得 ｜ 戴 】",
+          "memory_trick": "無塵室實戰口訣：先抓主角「Align」，接著做動作「the」，鎖定目標「die.」，諧音連讀 【 阿賴恩 ｜ 得 ｜ 戴 】 一口氣完成交接！",
+          "category": "custom-imported",
+          "additional_context": "擷取自「IMG_1663.JPG 等 4 張照片」專屬英文內容。",
+          "practiceQuestions": [
+            {
+              "id": "imp-q-1794625438484-3-1",
+              "question": "【導入句實戰 1/2】在「Align the die.」中，代表『動作 (V)』的核心單字是？",
+              "options": [
+                "cancel",
+                "forget",
+                "ignore",
+                "the"
+              ],
+              "correctIndex": 3,
+              "explanation": "正確答案為「the」。掌握主角 + 動作即可快速完成無塵室口報。"
+            },
+            {
+              "id": "imp-q-1794625438484-3-2",
+              "question": "【導入句實戰 2/2】若要表達「晶粒對位。」，正確的英文句型為？",
+              "options": [
+                "Align the die.",
+                "Nothing is ready for die..",
+                "Wait tomorrow shift check.",
+                "System unknown error now."
+              ],
+              "correctIndex": 0,
+              "explanation": "正確句型為「Align the die.」（晶粒對位。）。"
+            }
+          ]
+        },
+        {
+          "id": "imported-lesson-1794625438484-4",
+          "scenario": "檢查目前的狀態",
+          "english_sentence": "Check machine status.",
+          "chinese_translation": "檢查機台狀態。",
+          "components": {
+            "subject": "Check (👤 確認)",
+            "action": "machine (🏃‍♂️ 機台)",
+            "object": "status. (📦 狀態)",
+            "bridge": "the (🌉 橋樑)"
+          },
+          "phonetic_taiwan": "【 柴克 ｜ 麼許恩 ｜ 斯泰特斯 】",
+          "memory_trick": "無塵室實戰口訣：先抓主角「Check」，接著做動作「machine」，鎖定目標「status.」，諧音連讀 【 柴克 ｜ 麼許恩 ｜ 斯泰特斯 】 一口氣完成交接！",
+          "category": "custom-imported",
+          "additional_context": "擷取自「IMG_1663.JPG 等 4 張照片」專屬英文內容。",
+          "practiceQuestions": [
+            {
+              "id": "imp-q-1794625438484-4-1",
+              "question": "【導入句實戰 1/2】在「Check machine status.」中，代表『動作 (V)』的核心單字是？",
+              "options": [
+                "cancel",
+                "forget",
+                "ignore",
+                "machine"
+              ],
+              "correctIndex": 3,
+              "explanation": "正確答案為「machine」。掌握主角 + 動作即可快速完成無塵室口報。"
+            },
+            {
+              "id": "imp-q-1794625438484-4-2",
+              "question": "【導入句實戰 2/2】若要表達「檢查機台狀態。」，正確的英文句型為？",
+              "options": [
+                "Check machine status.",
+                "Nothing is ready for status..",
+                "Wait tomorrow shift check.",
+                "System unknown error now."
+              ],
+              "correctIndex": 0,
+              "explanation": "正確句型為「Check machine status.」（檢查機台狀態。）。"
+            }
+          ]
+        },
+        {
+          "id": "imported-lesson-1794242554530-0",
+          "scenario": "確認 PLC 當前運行狀態",
+          "english_sentence": "What is the PLC status?",
+          "chinese_translation": "PLC 的狀態是什麼？",
+          "components": {
+            "subject": "What (👤 關鍵目標)",
+            "action": "is (🏃‍♂️ 是)",
+            "object": "the PLC status? (📦 這狀態)",
+            "bridge": "the (🌉 這)"
+          },
+          "phonetic_taiwan": "【 威赫阿特 ｜ 伊茲 ｜ 得 ｜ 普勒克 ｜ 斯泰特斯 】",
+          "memory_trick": "無塵室實戰口訣：先抓主角「What」，接著做動作「is」，鎖定目標「the PLC status?」，諧音連讀 【 威赫阿特 ｜ 伊茲 ｜ 得 ｜ 普勒克 ｜ 斯泰特斯 】 一口氣完成交接！",
+          "category": "custom-imported",
+          "additional_context": "擷取自您導入的「IMG_1657.JPG」專屬英文內容。",
+          "practiceQuestions": []
+        },
+        {
+          "id": "imported-lesson-1794242554530-1",
+          "scenario": "回報機台內無晶圓",
+          "english_sentence": "There is no wafer present.",
+          "chinese_translation": "目前沒有晶圓在機台內。",
+          "components": {
+            "subject": "There (👤 關鍵目標)",
+            "action": "is (🏃‍♂️ 是)",
+            "object": "no wafer present. (📦 晶圓)",
+            "bridge": "the (🌉 橋樑)"
+          },
+          "phonetic_taiwan": "【 斯欸瑞欸 ｜ 伊茲 ｜ 恩歐 ｜ 威弗 ｜ 普瑞欸斯欸恩 】",
+          "memory_trick": "無塵室實戰口訣：先抓主角「There」，接著做動作「is」，鎖定目標「no wafer present.」，諧音連讀 【 斯欸瑞欸 ｜ 伊茲 ｜ 恩歐 ｜ 威弗 ｜ 普瑞欸斯欸恩 】 一口氣完成交接！",
+          "category": "custom-imported",
+          "additional_context": "擷取自您導入的「IMG_1657.JPG」專屬英文內容。",
+          "practiceQuestions": []
+        },
+        {
+          "id": "imported-lesson-1794242554531-2",
+          "scenario": "指示等待製程結束",
+          "english_sentence": "Wait for the end process.",
+          "chinese_translation": "等待製程程序結束。",
+          "components": {
+            "subject": "Wait (👤 等待)",
+            "action": "for (🏃‍♂️ 為了)",
+            "object": "the end process. (📦 這製程)",
+            "bridge": "the (🌉 這)"
+          },
+          "phonetic_taiwan": "【 威特 ｜ 佛 ｜ 得 ｜ 欸恩德 ｜ 普羅塞斯 】",
+          "memory_trick": "無塵室實戰口訣：先抓主角「Wait」，接著做動作「for」，鎖定目標「the end process.」，諧音連讀 【 威特 ｜ 佛 ｜ 得 ｜ 欸恩德 ｜ 普羅塞斯 】 一口氣完成交接！",
+          "category": "custom-imported",
+          "additional_context": "擷取自您導入的「IMG_1657.JPG」專屬英文內容。",
+          "practiceQuestions": []
+        },
+        {
+          "id": "imported-lesson-1794242554531-3",
+          "scenario": "變更控制權限至遠端",
+          "english_sentence": "Switch state to remote.",
+          "chinese_translation": "將狀態切換至遠端。",
+          "components": {
+            "subject": "Switch (👤 開關)",
+            "action": "state (🏃‍♂️ 關鍵目標)",
+            "object": "to remote. (📦 到)",
+            "bridge": "to (🌉 到)"
+          },
+          "phonetic_taiwan": "【 斯威奇 ｜ 斯特阿特欸 ｜ 吐 ｜ 瑞欸姆歐特欸 】",
+          "memory_trick": "無塵室實戰口訣：先抓主角「Switch」，接著做動作「state」，鎖定目標「to remote.」，諧音連讀 【 斯威奇 ｜ 斯特阿特欸 ｜ 吐 ｜ 瑞欸姆歐特欸 】 一口氣完成交接！",
+          "category": "custom-imported",
+          "additional_context": "擷取自您導入的「IMG_1657.JPG」專屬英文內容。",
+          "practiceQuestions": []
+        },
+        {
+          "id": "imported-lesson-1794242507133-0",
+          "scenario": "檢查機台錯誤",
+          "english_sentence": "Check the alarm report now.",
+          "chinese_translation": "現在檢查警報報告。",
+          "components": {
+            "subject": "Check (👤 確認)",
+            "action": "the (🏃‍♂️ 這)",
+            "object": "alarm report now. (📦 警報維修報告現在)",
+            "bridge": "the (🌉 橋樑)"
+          },
+          "phonetic_taiwan": "【 柴克 ｜ 得 ｜ 阿拉姆 ｜ 瑞珀特 ｜ 腦 】",
+          "memory_trick": "無塵室實戰口訣：先抓主角「Check」，接著做動作「the」，鎖定目標「alarm report now.」，諧音連讀 【 柴克 ｜ 得 ｜ 阿拉姆 ｜ 瑞珀特 ｜ 腦 】 一口氣完成交接！",
+          "category": "custom-imported",
+          "additional_context": "擷取自您導入的「IMG_1658.JPG」專屬英文內容。",
+          "practiceQuestions": []
+        },
+        {
+          "id": "imported-lesson-1794242507134-1",
+          "scenario": "生產結束操作",
+          "english_sentence": "The Production Production Production Lot.",
+          "chinese_translation": "已接收到批次結束訊號。",
+          "components": {
+            "subject": "The (👤 這)",
+            "action": "lot (🏃‍♂️ 晶圓批號 (Lot))",
+            "object": "end signal received. (📦 訊號)",
+            "bridge": "the (🌉 橋樑)"
+          },
+          "phonetic_taiwan": "【 得 ｜ 洛特 ｜ 欸恩德 ｜ 席格諾 ｜ 瑞欸克欸伊弗 】",
+          "memory_trick": "無塵室實戰口訣：先抓主角「The」，接著做動作「lot」，鎖定目標「end signal received.」，諧音連讀 【 得 ｜ 洛特 ｜ 欸恩德 ｜ 席格諾 ｜ 瑞欸克欸伊弗 】 一口氣完成交接！",
+          "category": "custom-imported",
+          "additional_context": "擷取自您導入的「IMG_1658.JPG」專屬英文內容。",
+          "practiceQuestions": []
+        },
+        {
+          "id": "imported-lesson-1794242507134-2",
+          "scenario": "數據查看",
+          "english_sentence": "Open the data viewer tool.",
+          "chinese_translation": "開啟數據查看工具。",
+          "components": {
+            "subject": "Open (👤 開啟)",
+            "action": "the (🏃‍♂️ 這)",
+            "object": "data viewer tool. (📦 機台)",
+            "bridge": "the (🌉 橋樑)"
+          },
+          "phonetic_taiwan": "【 歐噴 ｜ 得 ｜ 德阿特阿 ｜ 弗伊欸威爾 ｜ 圖爾 】",
+          "memory_trick": "無塵室實戰口訣：先抓主角「Open」，接著做動作「the」，鎖定目標「data viewer tool.」，諧音連讀 【 歐噴 ｜ 得 ｜ 德阿特阿 ｜ 弗伊欸威爾 ｜ 圖爾 】 一口氣完成交接！",
+          "category": "custom-imported",
+          "additional_context": "擷取自您導入的「IMG_1658.JPG」專屬英文內容。",
+          "practiceQuestions": []
+        },
+        {
+          "id": "imported-lesson-1794242507135-3",
+          "scenario": "標準樣品測試",
+          "english_sentence": "Test the golden sample first.",
+          "chinese_translation": "先測試黃金標準樣品。",
+          "components": {
+            "subject": "Test (👤 測試)",
+            "action": "the (🏃‍♂️ 這)",
+            "object": "golden sample first. (📦 關鍵目標)",
+            "bridge": "the (🌉 橋樑)"
+          },
+          "phonetic_taiwan": "【 泰斯特 ｜ 得 ｜ 格歐勒德欸恩 ｜ 斯阿姆普歐 ｜ 夫伊瑞斯特 】",
+          "memory_trick": "無塵室實戰口訣：先抓主角「Test」，接著做動作「the」，鎖定目標「golden sample first.」，諧音連讀 【 泰斯特 ｜ 得 ｜ 格歐勒德欸恩 ｜ 斯阿姆普歐 ｜ 夫伊瑞斯特 】 一口氣完成交接！",
+          "category": "custom-imported",
+          "additional_context": "擷取自您導入的「IMG_1658.JPG」專屬英文內容。",
+          "practiceQuestions": []
+        },
+        {
+          "id": "imported-lesson-1794242507135-4",
+          "scenario": "通訊協定設定",
+          "english_sentence": "Check the SECS log error.",
+          "chinese_translation": "檢查 SECS 通訊日誌錯誤。",
+          "components": {
+            "subject": "Check the SECS (👤 確認這)",
+            "action": "log (🏃‍♂️ 記錄)",
+            "object": "error. (📦 錯誤)",
+            "bridge": "the (🌉 橋樑)"
+          },
+          "phonetic_taiwan": "【 柴克 ｜ 得 ｜ 斯欸克斯 ｜ 洛格 ｜ 艾惹 】",
+          "memory_trick": "無塵室實戰口訣：先抓主角「Check the SECS」，接著做動作「log」，鎖定目標「error.」，諧音連讀 【 柴克 ｜ 得 ｜ 斯欸克斯 ｜ 洛格 ｜ 艾惹 】 一口氣完成交接！",
+          "category": "custom-imported",
+          "additional_context": "擷取自您導入的「IMG_1658.JPG」專屬英文內容。",
+          "practiceQuestions": []
+        }
+      ],
+      "srsMemory": {
+        "aoi-hw-lesson-1": {
+          "lessonId": "aoi-hw-lesson-1",
+          "intervalDays": 0,
+          "easeFactor": 2.25,
+          "repetitions": 0,
+          "lastRating": "hard",
+          "lastReviewedAt": 1794703991011,
+          "nextReviewAt": 1794703991011
+        }
+      },
+      "shadowingScores": {},
+      "speechRecordingsCount": 0,
+      "completedDrillsCount": 0,
+      "revision": 19,
+      "lastUpdated": "2026-11-21T18:02:45.859Z"
+    },
+    "default_fse_user": {
+      "userId": "default_fse_user",
+      "bookmarks": [],
+      "visitedLessonIds": [],
+      "readArticleIds": [],
+      "bookmarkedArticleIds": [],
+      "diagnostics": {},
+      "streakCount": 1,
+      "shiftSettings": {},
+      "lessonNotes": {},
+      "vocabNotes": {},
+      "flashcardMastered": [],
+      "importedVocab": [],
+      "importedLessons": [],
+      "speechRecordingsCount": 0,
+      "completedDrillsCount": 0,
+      "revision": 1,
+      "lastUpdated": "2026-11-14T03:30:35.976Z"
+    },
+    "smoke_test_sm2": {
+      "userId": "smoke_test_sm2",
+      "bookmarks": [],
+      "visitedLessonIds": [],
+      "readArticleIds": [],
+      "bookmarkedArticleIds": [],
+      "diagnostics": {},
+      "streakCount": 1,
+      "shiftSettings": {},
+      "lessonNotes": {},
+      "vocabNotes": {},
+      "flashcardMastered": [],
+      "importedVocab": [],
+      "importedLessons": [],
+      "srsMemory": {
+        "preset-1": {
+          "lessonId": "preset-1",
+          "intervalDays": 3,
+          "easeFactor": 2.5,
+          "repetitions": 2,
+          "lastRating": "good",
+          "lastReviewedAt": 1700000000000,
+          "nextReviewAt": 1700259200000
+        }
+      },
+      "speechRecordingsCount": 0,
+      "completedDrillsCount": 0,
+      "revision": 1,
+      "lastUpdated": "2026-11-14T09:43:47.172Z"
+    }
+  },
+  "syncJournals": [
+    {
+      "id": "sync_1795284165859_9p3gk",
+      "userId": "fse_engineer_local",
+      "type": "push",
+      "syncedItemsCount": 0,
+      "clientTimestamp": 1795284167013,
+      "serverTimestamp": 1795284165859,
+      "status": "success",
+      "details": "Merged 0 updates into revision 19"
+    },
+    {
+      "id": "sync_1795010329270_o2n9j",
+      "userId": "fse_engineer_local",
+      "type": "push",
+      "syncedItemsCount": 0,
+      "clientTimestamp": 1795010329747,
+      "serverTimestamp": 1795010329270,
+      "status": "success",
+      "details": "Merged 0 updates into revision 18"
+    },
+    {
+      "id": "sync_1795009729616_r8hms",
+      "userId": "fse_engineer_local",
+      "type": "push",
+      "syncedItemsCount": 0,
+      "clientTimestamp": 1795009729748,
+      "serverTimestamp": 1795009729616,
+      "status": "success",
+      "details": "Merged 0 updates into revision 17"
+    },
+    {
+      "id": "sync_1795009129251_xgukj",
+      "userId": "fse_engineer_local",
+      "type": "push",
+      "syncedItemsCount": 0,
+      "clientTimestamp": 1795009129743,
+      "serverTimestamp": 1795009129251,
+      "status": "success",
+      "details": "Merged 0 updates into revision 16"
+    },
+    {
+      "id": "sync_1795008529246_l66kb",
+      "userId": "fse_engineer_local",
+      "type": "push",
+      "syncedItemsCount": 0,
+      "clientTimestamp": 1795008529745,
+      "serverTimestamp": 1795008529246,
+      "status": "success",
+      "details": "Merged 0 updates into revision 15"
+    },
+    {
+      "id": "sync_1795007933283_hgfi1",
+      "userId": "fse_engineer_local",
+      "type": "push",
+      "syncedItemsCount": 0,
+      "clientTimestamp": 1795007933761,
+      "serverTimestamp": 1795007933283,
+      "status": "success",
+      "details": "Merged 0 updates into revision 14"
+    },
+    {
+      "id": "sync_1795007929367_9fnzj",
+      "userId": "fse_engineer_local",
+      "type": "push",
+      "syncedItemsCount": 0,
+      "clientTimestamp": 1795007929672,
+      "serverTimestamp": 1795007929367,
+      "status": "success",
+      "details": "Merged 0 updates into revision 13"
+    },
+    {
+      "id": "sync_1795007875992_blrum",
+      "userId": "fse_engineer_local",
+      "type": "push",
+      "syncedItemsCount": 0,
+      "clientTimestamp": 1795007876471,
+      "serverTimestamp": 1795007875992,
+      "status": "success",
+      "details": "Merged 0 updates into revision 12"
+    },
+    {
+      "id": "sync_1795007872310_d7cat",
+      "userId": "fse_engineer_local",
+      "type": "push",
+      "syncedItemsCount": 2,
+      "clientTimestamp": 1795007872371,
+      "serverTimestamp": 1795007872310,
+      "status": "success",
+      "details": "Merged 2 updates into revision 11"
+    },
+    {
+      "id": "sync_1794649427172_ek408",
+      "userId": "smoke_test_sm2",
+      "type": "push",
+      "syncedItemsCount": 1,
+      "clientTimestamp": 1794649427171,
+      "serverTimestamp": 1794649427172,
+      "status": "success",
+      "details": "Merged 1 updates into revision 1"
+    },
+    {
+      "id": "sync_1794644509851_eiwnq",
+      "userId": "fse_engineer_local",
+      "type": "push",
+      "syncedItemsCount": 0,
+      "clientTimestamp": 1794644510212,
+      "serverTimestamp": 1794644509851,
+      "status": "success",
+      "details": "Merged 0 updates into revision 10"
+    },
+    {
+      "id": "sync_1794644408833_0pvqt",
+      "userId": "fse_engineer_local",
+      "type": "push",
+      "syncedItemsCount": 0,
+      "clientTimestamp": 1794644409175,
+      "serverTimestamp": 1794644408833,
+      "status": "success",
+      "details": "Merged 0 updates into revision 9"
+    },
+    {
+      "id": "sync_1794643470728_1o6p2",
+      "userId": "fse_engineer_local",
+      "type": "push",
+      "syncedItemsCount": 1,
+      "clientTimestamp": 1794643471072,
+      "serverTimestamp": 1794643470728,
+      "status": "success",
+      "details": "Merged 1 updates into revision 8"
+    },
+    {
+      "id": "sync_1794628176501_l96hk",
+      "userId": "fse_engineer_local",
+      "type": "push",
+      "syncedItemsCount": 0,
+      "clientTimestamp": 1794628176631,
+      "serverTimestamp": 1794628176500,
+      "status": "success",
+      "details": "Merged 0 updates into revision 7"
+    },
+    {
+      "id": "sync_1794627855861_6mwjp",
+      "userId": "fse_engineer_local",
+      "type": "push",
+      "syncedItemsCount": 0,
+      "clientTimestamp": 1794627856127,
+      "serverTimestamp": 1794627855861,
+      "status": "success",
+      "details": "Merged 0 updates into revision 6"
+    },
+    {
+      "id": "sync_1794627851923_nnf5o",
+      "userId": "fse_engineer_local",
+      "type": "push",
+      "syncedItemsCount": 0,
+      "clientTimestamp": 1794627852037,
+      "serverTimestamp": 1794627851923,
+      "status": "success",
+      "details": "Merged 0 updates into revision 5"
+    },
+    {
+      "id": "sync_1794627653913_efnqr",
+      "userId": "fse_engineer_local",
+      "type": "push",
+      "syncedItemsCount": 0,
+      "clientTimestamp": 1794627654197,
+      "serverTimestamp": 1794627653913,
+      "status": "success",
+      "details": "Merged 0 updates into revision 4"
+    },
+    {
+      "id": "sync_1794627057967_ygb58",
+      "userId": "fse_engineer_local",
+      "type": "push",
+      "syncedItemsCount": 0,
+      "clientTimestamp": 1794627058246,
+      "serverTimestamp": 1794627057967,
+      "status": "success",
+      "details": "Merged 0 updates into revision 3"
+    },
+    {
+      "id": "sync_1794627054047_v4q2a",
+      "userId": "fse_engineer_local",
+      "type": "push",
+      "syncedItemsCount": 0,
+      "clientTimestamp": 1794627054145,
+      "serverTimestamp": 1794627054047,
+      "status": "success",
+      "details": "Merged 0 updates into revision 2"
+    },
+    {
+      "id": "sync_1794627035976_bgg0j",
+      "userId": "default_fse_user",
+      "type": "push",
+      "syncedItemsCount": 0,
+      "clientTimestamp": 1794627035976,
+      "serverTimestamp": 1794627035976,
+      "status": "success",
+      "details": "Merged 0 updates into revision 1"
+    },
+    {
+      "id": "sync_1794626573404_472d3",
+      "userId": "fse_engineer_local",
+      "type": "push",
+      "syncedItemsCount": 2,
+      "clientTimestamp": 1794626573627,
+      "serverTimestamp": 1794626573404,
+      "status": "success",
+      "details": "Merged 2 updates into revision 1"
+    }
+  ],
+  "customLessons": [],
+  "systemAuditLogs": [
+    {
+      "timestamp": "2026-11-14T03:18:41.449Z",
+      "level": "info",
+      "event": "Database initialized with high-resilience engine"
+    }
+  ]
+}

@@ -53,8 +53,7 @@ export const TechSpotlightCard: React.FC<TechSpotlightCardProps> = ({
         onMouseLeave={handleMouseLeave}
         animate={{
           rotateX: tilt.rotateX,
-          rotateY: tilt.rotateY,
-          scale: isHovered ? 1.008 : 1
+          rotateY: tilt.rotateY
         }}
         transition={{
           type: 'spring',

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   CheckCircle2,
@@ -34,8 +34,21 @@ const ToastContext = createContext<ToastContextValue | null>(null);
 
 export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const timersRef = useRef<Map<string, number>>(new Map());
+
+  useEffect(() => {
+    return () => {
+      timersRef.current.forEach((tid) => window.clearTimeout(tid));
+      timersRef.current.clear();
+    };
+  }, []);
 
   const removeToast = useCallback((id: string) => {
+    const tid = timersRef.current.get(id);
+    if (tid !== undefined) {
+      window.clearTimeout(tid);
+      timersRef.current.delete(id);
+    }
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
@@ -56,9 +69,11 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         playWaferSnapSound();
       }
 
-      setTimeout(() => {
+      const tid = window.setTimeout(() => {
+        timersRef.current.delete(id);
         removeToast(id);
       }, newToast.duration);
+      timersRef.current.set(id, tid);
     },
     [removeToast]
   );
@@ -158,8 +173,10 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 </div>
 
                 <button
+                  type="button"
+                  aria-label="關閉通知"
                   onClick={() => removeToast(t.id)}
-                  className="p-1 text-slate-400 hover:text-slate-200 rounded-lg hover:bg-slate-800 transition-colors shrink-0"
+                  className="p-1 text-slate-400 hover:text-slate-200 rounded-lg hover:bg-slate-800 transition-colors shrink-0 cursor-pointer"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>

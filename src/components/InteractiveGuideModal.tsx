@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Lightbulb, Sparkles, Volume2, CheckCircle2, ShieldCheck, Zap } from 'lucide-react';
 
@@ -10,12 +10,31 @@ interface InteractiveGuideModalProps {
 export const InteractiveGuideModal: React.FC<InteractiveGuideModalProps> = ({ isOpen, onClose }) => {
   const [activeTab, setActiveTab] = useState<'svo' | 'phonetic' | 'tips'>('svo');
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-md">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="國小語序拆解與無塵室口訣通關指南"
+        onClick={onClose}
+        className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-md"
+      >
         <motion.div
+          onClick={(e) => e.stopPropagation()}
           initial={{ opacity: 0, scale: 0.95, y: 15 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.95, y: 15 }}
@@ -38,18 +57,23 @@ export const InteractiveGuideModal: React.FC<InteractiveGuideModalProps> = ({ is
               </div>
             </div>
             <button
+              type="button"
               onClick={onClose}
-              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors cursor-pointer"
+              aria-label="關閉通關指南"
+              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
             >
               <X className="w-4 h-4" />
             </button>
           </div>
 
           {/* Sub Navigation Tabs */}
-          <div className="flex border-b border-slate-800 bg-slate-950/60 p-1.5 gap-1.5 shrink-0 overflow-x-auto no-scrollbar">
+          <div role="tablist" aria-label="指南分頁" className="flex border-b border-slate-800 bg-slate-950/60 p-1.5 gap-1.5 shrink-0 overflow-x-auto no-scrollbar">
             <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'svo'}
               onClick={() => setActiveTab('svo')}
-              className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap ${
+              className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${
                 activeTab === 'svo'
                   ? 'bg-amber-400 text-slate-950 shadow-sm'
                   : 'text-slate-400 hover:bg-slate-800 hover:text-white'
@@ -59,8 +83,11 @@ export const InteractiveGuideModal: React.FC<InteractiveGuideModalProps> = ({ is
               <span>1. SVO 國小語序拆解</span>
             </button>
             <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'phonetic'}
               onClick={() => setActiveTab('phonetic')}
-              className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap ${
+              className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${
                 activeTab === 'phonetic'
                   ? 'bg-amber-400 text-slate-950 shadow-sm'
                   : 'text-slate-400 hover:bg-slate-800 hover:text-white'
@@ -70,8 +97,11 @@ export const InteractiveGuideModal: React.FC<InteractiveGuideModalProps> = ({ is
               <span>2. 擬真台味諧音法</span>
             </button>
             <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'tips'}
               onClick={() => setActiveTab('tips')}
-              className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap ${
+              className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${
                 activeTab === 'tips'
                   ? 'bg-amber-400 text-slate-950 shadow-sm'
                   : 'text-slate-400 hover:bg-slate-800 hover:text-white'
@@ -194,8 +224,9 @@ export const InteractiveGuideModal: React.FC<InteractiveGuideModalProps> = ({ is
           {/* Footer Close */}
           <div className="p-3 bg-slate-950 border-t border-slate-800 flex justify-end shrink-0">
             <button
+              type="button"
               onClick={onClose}
-              className="px-4 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs cursor-pointer shadow-sm transition-all hover:scale-105 active:scale-95"
+              className="px-4 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs cursor-pointer shadow-sm transition-colors active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
             >
               我知道了，開始實戰練習！
             </button>

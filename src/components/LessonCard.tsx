@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Lesson } from '../types';
 import { Volume2, Bookmark, CheckCircle2, Copy, Sparkles, Mic, MicOff, HelpCircle, Check, X, Award, Keyboard, ArrowRight, ArrowLeft, Edit3, StickyNote, Save, Trash2, SkipForward, Play, ShieldAlert, Headphones, Globe, Zap, Square, SlidersHorizontal, RefreshCw, Cpu, LayoutGrid, Layers } from 'lucide-react';
-import { speakEnglish, speakBilingualLesson, speakEnhancedPronunciation, cancelSpeech, listenSpeech, useSpeechQueue, cleanEnglishText, unlockAudioContext, getPreferredAccentMode, setPreferredAccentMode } from '../utils/speech';
-import { playClickSound, playSuccessChime, playLaserScanSound, playSvoAssembleChime } from '../utils/audioEffects';
+import { speakEnglish, speakChinese, speakSingleEnglishWord, speakBilingualLesson, speakEnhancedPronunciation, cancelSpeech, listenSpeech, useSpeechQueue, cleanEnglishText, unlockAudioContext, getPreferredAccentMode, setPreferredAccentMode, globalAudioScheduler, SpeechProgressPayload, predictAndCacheNextSentences, schedulePredictiveAudioCache } from '../utils/speech';
+import { playClickSound, playSuccessChime, playLaserScanSound, playSvoAssembleChime, triggerHapticClick, triggerHapticPhraseComplete, triggerHapticWarning } from '../utils/audioEffects';
 import { getLessonPracticeQuestions } from '../utils/lessonQuizHelper';
 import { getLessonAllSentences, getSentenceComponents, getMandarinPhoneticFromSentence, LessonSentenceItem } from '../utils/lessonSentenceHelper';
 import { convertPhoneticToZhuyin, getSentenceZhuyinPhonetic } from '../utils/zhuyinHelper';
@@ -10,6 +10,8 @@ import { lookupWordDefinition, getWordKKPhonetic, getSentenceKKPhonetic } from '
 import { InteractiveSentenceViewer } from './InteractiveSentenceViewer';
 import { useToast } from '../context/ToastContext';
 import { motion, AnimatePresence } from 'motion/react';
+import { SrsCardState, MemoryRating, formatNextReviewLabel } from '../utils/srsScheduler';
+import { queueAutoServerSync } from '../utils/serverSyncService';
 
 interface LessonCardProps {
   lesson: Lesson;
@@ -31,6 +33,9 @@ interface LessonCardProps {
   hoursLeft?: number;
   minutesLeft?: number;
   onRefreshQuestions?: () => void;
+  disableGlobalShortcuts?: boolean;
+  srsState?: SrsCardState;
+  onRateMemory?: (lessonId: string, rating: MemoryRating) => void;
 }
 
 const LESSON_NOTES_STORAGE_KEY = 'fab_fse_lesson_notes';
@@ -54,7 +59,10 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
   daysLeft = 2,
   hoursLeft = 14,
   minutesLeft = 30,
-  onRefreshQuestions
+  onRefreshQuestions,
+  disableGlobalShortcuts = false,
+  srsState,
+  onRateMemory
 }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isEnhancedPlaying, setIsEnhancedPlaying] = useState(false);
@@ -65,10 +73,21 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
   const [speechMatch, setSpeechMatch] = useState<boolean | null>(null);
   const [copied, setCopied] = useState(false);
   const [highlightSvo, setHighlightSvo] = useState<'subject' | 'action' | 'bridge' | 'object' | null>(null);
+  const [readingWordIndex, setReadingWordIndex] = useState<number | null>(null);
   const [showSyntaxBlocks, setShowSyntaxBlocks] = useState<boolean>(false);
   const [isLevelPickerOpen, setIsLevelPickerOpen] = useState<boolean>(false);
   const [isMaskingHelper, setIsMaskingHelper] = useState<boolean>(false);
+  const [isMoreActionsOpen, setIsMoreActionsOpen] = useState<boolean>(false);
+  const [showMemoryTrick, setShowMemoryTrick] = useState<boolean>(false);
   const [currentSpeed, setCurrentSpeed] = useState<number>(speechSpeed);
+
+  const drillSessionRef = useRef<number>(0);
+  const drillTimerRef = useRef<any>(null);
+  const isStartingSpeechRef = useRef<boolean>(false);
+  const lastSpeechClickTimeRef = useRef<number>(0);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const moreActionsRef = useRef<HTMLDivElement | null>(null);
 
   const [activeSentenceIndex, setActiveSentenceIndex] = useState<number>(0);
   const { showCopyToast, showBookmarkToast } = useToast();
@@ -76,8 +95,12 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
   // Sequential Speech Queue State
   const {
     isPlaying: isQueuePlaying,
+    enginePhase,
     currentTask,
     progress: queueProgress,
+    wordIndex: queueWordIndex,
+    currentWord: queueCurrentWord,
+    totalWords: queueTotalWords,
     queueLength,
     remainingQueueCount,
     remainingSeconds,
@@ -98,6 +121,19 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
   const [isNoteModalOpen, setIsNoteModalOpen] = useState<boolean>(false);
   const [tempNoteText, setTempNoteText] = useState<string>('');
 
+  useEffect(() => {
+    const syncNotes = () => {
+      try {
+        const saved = localStorage.getItem(LESSON_NOTES_STORAGE_KEY);
+        if (saved) {
+          setLessonNotes(JSON.parse(saved));
+        }
+      } catch {}
+    };
+    window.addEventListener('fse-server-synced', syncNotes);
+    return () => window.removeEventListener('fse-server-synced', syncNotes);
+  }, []);
+
   const currentLessonNote = lessonNotes[lesson.id] || '';
 
   const handleSaveLessonNote = () => {
@@ -111,6 +147,7 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
     setLessonNotes(updated);
     try {
       localStorage.setItem(LESSON_NOTES_STORAGE_KEY, JSON.stringify(updated));
+      queueAutoServerSync(2500);
     } catch (e) {
       console.error('Failed to save lesson note', e);
     }
@@ -125,6 +162,7 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
     setTempNoteText('');
     try {
       localStorage.setItem(LESSON_NOTES_STORAGE_KEY, JSON.stringify(updated));
+      queueAutoServerSync(2500);
     } catch (e) {
       console.error('Failed to clear lesson note', e);
     }
@@ -135,16 +173,115 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
   const currentSentence = allSentences[activeSentenceIndex] || allSentences[0];
   const activeComponents = getSentenceComponents(lesson, currentSentence);
 
+  const cancelActiveDrills = () => {
+    drillSessionRef.current += 1;
+    if (drillTimerRef.current) {
+      clearTimeout(drillTimerRef.current);
+      drillTimerRef.current = null;
+    }
+    setIsPlaying(false);
+    setIsEnhancedPlaying(false);
+    setIsThreeSpeedPlaying(false);
+    setThreeSpeedStage(0);
+    setReadingWordIndex(null);
+  };
+
   useEffect(() => {
+    const handleSpeechInterrupted = () => {
+      if (isStartingSpeechRef.current) return;
+      drillSessionRef.current += 1;
+      if (drillTimerRef.current) {
+        clearTimeout(drillTimerRef.current);
+        drillTimerRef.current = null;
+      }
+      setIsPlaying(false);
+      setIsEnhancedPlaying(false);
+      setIsThreeSpeedPlaying(false);
+      setThreeSpeedStage(0);
+      setReadingWordIndex(null);
+    };
+    window.addEventListener('fse-speech-interrupted', handleSpeechInterrupted);
+    return () => {
+      window.removeEventListener('fse-speech-interrupted', handleSpeechInterrupted);
+    };
+  }, []);
+
+  useEffect(() => {
+    cancelActiveDrills();
+    cancelSpeech();
     setActiveSentenceIndex(0);
     setSelectedAnswers({});
     setUserTranscript(null);
     setSpeechMatch(null);
+    setIsMoreActionsOpen(false);
+    return () => {
+      drillSessionRef.current += 1;
+      if (drillTimerRef.current) {
+        clearTimeout(drillTimerRef.current);
+        drillTimerRef.current = null;
+      }
+      if (copyTimerRef.current) {
+        clearTimeout(copyTimerRef.current);
+        copyTimerRef.current = null;
+      }
+      if (errorTimerRef.current) {
+        clearTimeout(errorTimerRef.current);
+        errorTimerRef.current = null;
+      }
+      cancelSpeech();
+    };
   }, [lesson.id]);
+
+  // Escape & outside-click handling for internal popovers & note modal
+  useEffect(() => {
+    if (!isNoteModalOpen && !isLevelPickerOpen && !isMoreActionsOpen) return;
+    const handleOverlayKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (isNoteModalOpen) {
+          setIsNoteModalOpen(false);
+        } else if (isMoreActionsOpen) {
+          setIsMoreActionsOpen(false);
+        } else if (isLevelPickerOpen) {
+          setIsLevelPickerOpen(false);
+        }
+      }
+    };
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (isMoreActionsOpen && moreActionsRef.current && !moreActionsRef.current.contains(e.target as Node)) {
+        setIsMoreActionsOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleOverlayKey);
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => {
+      window.removeEventListener('keydown', handleOverlayKey);
+      document.removeEventListener('mousedown', handleOutsideClick);
+    };
+  }, [isNoteModalOpen, isLevelPickerOpen, isMoreActionsOpen]);
 
   useEffect(() => {
     setCurrentSpeed(speechSpeed);
   }, [speechSpeed]);
+
+  // 預測性音訊緩存：根據 currentSpeed (speechSpeed) 提前預取當前句型、下一個句型與前後相鄰關卡的音訊數據，消除切換關卡時的載入空白
+  useEffect(() => {
+    const total = allLessons.length;
+    const curIdx = typeof currentIndex === 'number' && currentIndex >= 0 ? currentIndex : 0;
+    const nextLesson = total > 1 ? allLessons[(curIdx + 1) % total] : undefined;
+    const prevLesson = total > 1 ? allLessons[(curIdx - 1 + total) % total] : undefined;
+
+    const nextLessonSentences = nextLesson ? getLessonAllSentences(nextLesson) : [];
+    const prevLessonSentences = prevLesson ? getLessonAllSentences(prevLesson) : [];
+
+    predictAndCacheNextSentences({
+      currentSentences: allSentences,
+      activeSentenceIndex,
+      nextLessonSentences,
+      prevLessonSentences,
+      speechSpeed: currentSpeed,
+      includeBilingual: getPreferredAccentMode() === 'tw_mandarin_bilingual'
+    });
+  }, [lesson.id, activeSentenceIndex, currentSpeed, allLessons, currentIndex]);
 
   // Mark card as visited on load or interaction
   useEffect(() => {
@@ -153,98 +290,233 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
     }
   }, [lesson.id, isVisited]);
 
-  // Uses Web Speech API with Enhanced Semiconductor Pronunciation (Click to Play / Click again to stop)
-  const handleListenSpeech = (customSpeed?: number, targetText?: string) => {
-    if (isPlaying) {
-      cancelSpeech();
-      setIsPlaying(false);
-      setIsEnhancedPlaying(false);
-      return;
-    }
-    playLaserScanSound();
-    setIsPlaying(true);
-    setIsEnhancedPlaying(false);
-    if (onMarkVisited && lesson.id) onMarkVisited(lesson.id);
-    const effectiveSpeed = customSpeed || currentSpeed;
-    speakEnhancedPronunciation(
-      targetText || currentSentence.english,
-      effectiveSpeed,
-      () => {
-        setIsPlaying(false);
-        setIsEnhancedPlaying(false);
-      }
-    );
+  const handleSentenceProgress = (payload: SpeechProgressPayload, sessionEpoch: number) => {
+    if (drillSessionRef.current !== sessionEpoch) return;
+    setReadingWordIndex(payload.wordIndex >= 0 ? payload.wordIndex : null);
   };
 
-  // ⚡ 強化發音：以 0.78x 慢速重音音節清晰咬字、半導體術語音節爆破加強朗讀 (Click again to stop)
-  const handleListenEnhancedPronunciation = () => {
-    if (isPlaying && isEnhancedPlaying) {
+  // Uses Cloud HD + Native Fallback Speech Engine (Click to Play / Rapid-click restarts cleanly)
+  const handleListenSpeech = (customSpeed?: number, targetText?: string, forceRestart: boolean = false) => {
+    const now = Date.now();
+    const isRapidBurst = now - lastSpeechClickTimeRef.current < 320;
+    lastSpeechClickTimeRef.current = now;
+
+    if (!forceRestart && !isRapidBurst && (isPlaying || isThreeSpeedPlaying)) {
+      cancelActiveDrills();
       cancelSpeech();
-      setIsPlaying(false);
-      setIsEnhancedPlaying(false);
       return;
     }
-    playLaserScanSound();
-    setIsPlaying(true);
-    setIsEnhancedPlaying(true);
-    if (onMarkVisited && lesson.id) onMarkVisited(lesson.id);
-    speakEnhancedPronunciation(currentSentence.english, 0.78, () => {
-      setIsPlaying(false);
+
+    isStartingSpeechRef.current = true;
+    try {
+      cancelActiveDrills();
+      cancelSpeech();
+      if (!isRapidBurst) {
+        triggerHapticClick();
+      }
+      const mySession = ++drillSessionRef.current;
+      setIsPlaying(true);
       setIsEnhancedPlaying(false);
-    });
+      if (onMarkVisited && lesson.id) onMarkVisited(lesson.id);
+      const effectiveSpeed = customSpeed || currentSpeed;
+
+      // 若使用者於語音中心開啟「🇹🇼 台英雙語對照教學」，點擊主發音鈕自動執行中英雙語導讀
+      if (!targetText && getPreferredAccentMode() === 'tw_mandarin_bilingual') {
+        speakBilingualLesson(
+          currentSentence.english,
+          currentSentence.chinese,
+          effectiveSpeed,
+          () => {
+            if (drillSessionRef.current === mySession) {
+              setIsPlaying(false);
+              setIsEnhancedPlaying(false);
+              setReadingWordIndex(null);
+            }
+          },
+          (payload) => handleSentenceProgress(payload, mySession)
+        );
+        return;
+      }
+
+      speakEnglish(
+        targetText || currentSentence.english,
+        effectiveSpeed,
+        () => {
+          if (drillSessionRef.current === mySession) {
+            setIsPlaying(false);
+            setIsEnhancedPlaying(false);
+            setReadingWordIndex(null);
+            triggerHapticPhraseComplete();
+          }
+        },
+        undefined,
+        100,
+        false,
+        (payload) => handleSentenceProgress(payload, mySession)
+      );
+    } finally {
+      isStartingSpeechRef.current = false;
+    }
+  };
+
+  // ⚡ 強化發音：以 0.78x 慢速重音音節清晰咬字朗讀 (Click again to stop, rapid-click restarts cleanly)
+  const handleListenEnhancedPronunciation = () => {
+    const now = Date.now();
+    const isRapidBurst = now - lastSpeechClickTimeRef.current < 320;
+    lastSpeechClickTimeRef.current = now;
+
+    if (!isRapidBurst && isPlaying && isEnhancedPlaying) {
+      cancelActiveDrills();
+      cancelSpeech();
+      return;
+    }
+
+    isStartingSpeechRef.current = true;
+    try {
+      cancelActiveDrills();
+      cancelSpeech();
+      if (!isRapidBurst) {
+        triggerHapticClick();
+      }
+      const mySession = ++drillSessionRef.current;
+      setIsPlaying(true);
+      setIsEnhancedPlaying(true);
+      if (onMarkVisited && lesson.id) onMarkVisited(lesson.id);
+      speakEnhancedPronunciation(
+        currentSentence.english,
+        0.78,
+        () => {
+          if (drillSessionRef.current === mySession) {
+            setIsPlaying(false);
+            setIsEnhancedPlaying(false);
+            setReadingWordIndex(null);
+            triggerHapticPhraseComplete();
+          }
+        },
+        1.05,
+        (payload) => handleSentenceProgress(payload, mySession)
+      );
+    } finally {
+      isStartingSpeechRef.current = false;
+    }
   };
 
   // 雙語對照朗讀（中文情境釋義 + 晶圓廠英文句子）
   const handleListenBilingual = () => {
-    if (isPlaying || isThreeSpeedPlaying) {
+    const now = Date.now();
+    const isRapidBurst = now - lastSpeechClickTimeRef.current < 320;
+    lastSpeechClickTimeRef.current = now;
+
+    if (!isRapidBurst && (isPlaying || isThreeSpeedPlaying)) {
+      cancelActiveDrills();
       cancelSpeech();
-      setIsPlaying(false);
-      setIsEnhancedPlaying(false);
-      setIsThreeSpeedPlaying(false);
-      setThreeSpeedStage(0);
       return;
     }
-    playClickSound();
-    setIsPlaying(true);
-    setIsEnhancedPlaying(false);
-    if (onMarkVisited && lesson.id) onMarkVisited(lesson.id);
-    speakBilingualLesson(currentSentence.english, currentSentence.chinese, currentSpeed, () => {
-      setIsPlaying(false);
+
+    isStartingSpeechRef.current = true;
+    try {
+      cancelActiveDrills();
+      cancelSpeech();
+      if (!isRapidBurst) {
+        triggerHapticClick();
+      }
+      const mySession = ++drillSessionRef.current;
+      setIsPlaying(true);
       setIsEnhancedPlaying(false);
-    });
+      if (onMarkVisited && lesson.id) onMarkVisited(lesson.id);
+      speakBilingualLesson(
+        currentSentence.english,
+        currentSentence.chinese,
+        currentSpeed,
+        () => {
+          if (drillSessionRef.current === mySession) {
+            setIsPlaying(false);
+            setIsEnhancedPlaying(false);
+            setReadingWordIndex(null);
+          }
+        },
+        (payload) => handleSentenceProgress(payload, mySession)
+      );
+    } finally {
+      isStartingSpeechRef.current = false;
+    }
   };
 
-  // 🔁 零基礎三速漸進帶讀特訓：第1遍 0.68x 慢速聽音 ➔ 第2遍 0.85x 跟讀記憶 ➔ 第3遍 1.0x 現場實戰
+  // 🔁 零基礎三速漸進帶讀特訓：第1遍 0.7x 慢速聽音 ➔ 第2遍 0.85x 跟讀記憶 ➔ 第3遍 1.0x 現場實戰 (透過單一 Session Epoch 原子化排程，零計時器衝突)
   const handleListenThreeSpeedDrill = () => {
-    if (isThreeSpeedPlaying || isPlaying) {
+    const now = Date.now();
+    const isRapidBurst = now - lastSpeechClickTimeRef.current < 320;
+    lastSpeechClickTimeRef.current = now;
+
+    if (!isRapidBurst && (isThreeSpeedPlaying || isPlaying)) {
+      cancelActiveDrills();
       cancelSpeech();
-      setIsPlaying(false);
-      setIsThreeSpeedPlaying(false);
-      setThreeSpeedStage(0);
       return;
     }
-    playClickSound();
-    setIsThreeSpeedPlaying(true);
-    setIsPlaying(true);
-    setThreeSpeedStage(1);
-    if (onMarkVisited && lesson.id) onMarkVisited(lesson.id);
 
-    const target = currentSentence.english;
-    speakEnhancedPronunciation(target, 0.68, () => {
-      setThreeSpeedStage(2);
-      setTimeout(() => {
-        speakEnhancedPronunciation(target, 0.85, () => {
-          setThreeSpeedStage(3);
-          setTimeout(() => {
-            speakEnhancedPronunciation(target, 1.0, () => {
+    isStartingSpeechRef.current = true;
+    try {
+      cancelActiveDrills();
+      cancelSpeech();
+      if (!isRapidBurst) {
+        triggerHapticClick();
+      }
+      const mySession = ++drillSessionRef.current;
+      setIsThreeSpeedPlaying(true);
+      setIsPlaying(true);
+      setThreeSpeedStage(1);
+      if (onMarkVisited && lesson.id) onMarkVisited(lesson.id);
+
+      const target = currentSentence.english;
+      globalAudioScheduler.scheduleSequence(
+        [
+          {
+            text: target,
+            lang: 'en-US',
+            rate: 0.7,
+            bufferAfterMs: 320,
+            onStepStart: () => {
+              if (drillSessionRef.current === mySession) setThreeSpeedStage(1);
+            },
+            onStepProgress: (payload) => handleSentenceProgress(payload, mySession)
+          },
+          {
+            text: target,
+            lang: 'en-US',
+            rate: 0.85,
+            bufferAfterMs: 320,
+            onStepStart: () => {
+              if (drillSessionRef.current === mySession) setThreeSpeedStage(2);
+            },
+            onStepProgress: (payload) => handleSentenceProgress(payload, mySession)
+          },
+          {
+            text: target,
+            lang: 'en-US',
+            rate: 1.0,
+            bufferAfterMs: 180,
+            onStepStart: () => {
+              if (drillSessionRef.current === mySession) setThreeSpeedStage(3);
+            },
+            onStepProgress: (payload) => handleSentenceProgress(payload, mySession)
+          }
+        ],
+        {
+          interrupt: false,
+          isCancelled: () => drillSessionRef.current !== mySession,
+          onSequenceEnd: () => {
+            if (drillSessionRef.current === mySession) {
               setIsThreeSpeedPlaying(false);
               setIsPlaying(false);
               setThreeSpeedStage(0);
-            });
-          }, 350);
-        });
-      }, 350);
-    });
+              setReadingWordIndex(null);
+            }
+          }
+        }
+      );
+    } finally {
+      isStartingSpeechRef.current = false;
+    }
   };
 
   const [speechScore, setSpeechScore] = useState<number | null>(null);
@@ -281,9 +553,11 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
         if (score >= 60) {
           setSpeechMatch(true);
           playSuccessChime();
+          triggerHapticPhraseComplete();
         } else {
           setSpeechMatch(false);
           playClickSound();
+          triggerHapticWarning();
         }
       },
       (err) => {
@@ -293,15 +567,26 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
     );
   };
 
-  const handleCopy = () => {
+  const handleCopy = async () => {
     playClickSound();
     const mandarinPhoneticStr = currentSentence.mandarinPhonetic || getMandarinPhoneticFromSentence(currentSentence.english, currentSentence.phonetic);
     const kkStr = getSentenceKKPhonetic(currentSentence.english);
     const textToCopy = `${lesson.scenario}\n句型：${currentSentence.english}\n中文：${currentSentence.chinese}\nKK音標：${kkStr}\n台味諧音：${currentSentence.phonetic}\n中文諧音：${mandarinPhoneticStr}\n記憶技巧：${lesson.memory_trick}`;
-    navigator.clipboard.writeText(textToCopy);
-    setCopied(true);
-    showCopyToast(lesson.scenario);
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      if (!navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
+        throw new Error('Clipboard API unavailable');
+      }
+      await navigator.clipboard.writeText(textToCopy);
+      setCopied(true);
+      showCopyToast(lesson.scenario);
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = setTimeout(() => {
+        copyTimerRef.current = null;
+        setCopied(false);
+      }, 2000);
+    } catch {
+      showCopyToast('複製失敗，請手動選取文字複製');
+    }
   };
 
   const [activeDetailTab, setActiveDetailTab] = useState<'svo' | 'builder' | 'quiz'>('svo');
@@ -318,36 +603,159 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
 
   const practiceQuestions = getLessonPracticeQuestions(lesson, cycleNumber);
 
-  // Mobile horizontal touch swipe gestures (左右滑動切換上一關/下一關)
+  // Cleanroom Glove-Friendly Horizontal Touch Swipe Gestures (無塵室手套友善：左右滑動切換上一關/下一關)
   const touchStartXRef = useRef<number | null>(null);
   const touchStartYRef = useRef<number | null>(null);
+  const touchStartTimeRef = useRef<number>(0);
+  const isHorizontalSwipingRef = useRef<boolean>(false);
+  const hasTriggeredThresholdVibrateRef = useRef<boolean>(false);
+  const swipeFlashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const [swipeOffsetX, setSwipeOffsetX] = useState<number>(0);
+  const [swipeActionReady, setSwipeActionReady] = useState<'prev' | 'next' | null>(null);
+  const [lastSwipeFlash, setLastSwipeFlash] = useState<'prev' | 'next' | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (swipeFlashTimerRef.current) {
+        clearTimeout(swipeFlashTimerRef.current);
+      }
+    };
+  }, []);
+
+  const triggerHapticPulse = (ms: number = 12) => {
+    try {
+      if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+        navigator.vibrate(ms);
+      }
+    } catch {}
+  };
+
+  const triggerSwipeFlash = (dir: 'prev' | 'next') => {
+    setLastSwipeFlash(dir);
+    if (swipeFlashTimerRef.current) clearTimeout(swipeFlashTimerRef.current);
+    swipeFlashTimerRef.current = setTimeout(() => {
+      swipeFlashTimerRef.current = null;
+      setLastSwipeFlash(null);
+    }, 360);
+  };
 
   const handleTouchStart = (e: React.TouchEvent) => {
     if (e.touches.length === 1) {
       touchStartXRef.current = e.touches[0].clientX;
       touchStartYRef.current = e.touches[0].clientY;
+      touchStartTimeRef.current = Date.now();
+      isHorizontalSwipingRef.current = false;
+      hasTriggeredThresholdVibrateRef.current = false;
     }
   };
 
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (touchStartXRef.current === null || touchStartYRef.current === null || e.touches.length !== 1) return;
+    const currentX = e.touches[0].clientX;
+    const currentY = e.touches[0].clientY;
+    const deltaX = currentX - touchStartXRef.current;
+    const deltaY = currentY - touchStartYRef.current;
+
+    if (!isHorizontalSwipingRef.current) {
+      // Lock into horizontal gesture when horizontal drag clearly dominates vertical scroll
+      if (Math.abs(deltaX) > 14 && Math.abs(deltaX) > Math.abs(deltaY) * 1.2) {
+        isHorizontalSwipingRef.current = true;
+      } else if (Math.abs(deltaY) > 22) {
+        // User is scrolling vertically; abort horizontal tracking
+        touchStartXRef.current = null;
+        touchStartYRef.current = null;
+        setSwipeOffsetX(0);
+        setSwipeActionReady(null);
+        return;
+      } else {
+        return;
+      }
+    }
+
+    // Smooth damped resistance so card & gesture pill follow the gloved thumb naturally
+    const dampedOffset = Math.max(-88, Math.min(88, Math.round(deltaX * 0.48)));
+    setSwipeOffsetX(dampedOffset);
+
+    const readyDir: 'prev' | 'next' | null =
+      deltaX <= -46 && onNextLesson
+        ? 'next'
+        : deltaX >= 46 && onPrevLesson
+        ? 'prev'
+        : null;
+
+    if (readyDir && !hasTriggeredThresholdVibrateRef.current) {
+      hasTriggeredThresholdVibrateRef.current = true;
+      triggerHapticPulse(10);
+      // 當手勢滑動達臨界點時，立即以最高優先權預熱目標關卡首句音訊，確保放開手指瞬間 0ms 就緒
+      if (allLessons.length > 1 && typeof currentIndex === 'number') {
+        const targetIdx =
+          readyDir === 'next'
+            ? (currentIndex + 1) % allLessons.length
+            : (currentIndex - 1 + allLessons.length) % allLessons.length;
+        const targetLesson = allLessons[targetIdx];
+        if (targetLesson) {
+          const targetSentences = getLessonAllSentences(targetLesson);
+          if (targetSentences[0]?.english) {
+            schedulePredictiveAudioCache(
+              [
+                {
+                  text: targetSentences[0].english,
+                  lang: 'en-US',
+                  speechSpeed: currentSpeed,
+                  priority: 'immediate'
+                }
+              ],
+              currentSpeed
+            ).catch(() => {});
+          }
+        }
+      }
+    } else if (!readyDir && hasTriggeredThresholdVibrateRef.current) {
+      hasTriggeredThresholdVibrateRef.current = false;
+    }
+
+    setSwipeActionReady(readyDir);
+  };
+
+  const resetSwipeState = () => {
+    touchStartXRef.current = null;
+    touchStartYRef.current = null;
+    isHorizontalSwipingRef.current = false;
+    hasTriggeredThresholdVibrateRef.current = false;
+    setSwipeOffsetX(0);
+    setSwipeActionReady(null);
+  };
+
   const handleTouchEnd = (e: React.TouchEvent) => {
-    if (touchStartXRef.current === null || touchStartYRef.current === null) return;
+    if (touchStartXRef.current === null || touchStartYRef.current === null) {
+      resetSwipeState();
+      return;
+    }
     const touchEndX = e.changedTouches[0].clientX;
     const touchEndY = e.changedTouches[0].clientY;
     const deltaX = touchEndX - touchStartXRef.current;
     const deltaY = touchEndY - touchStartYRef.current;
+    const elapsedMs = Math.max(1, Date.now() - touchStartTimeRef.current);
 
-    touchStartXRef.current = null;
-    touchStartYRef.current = null;
+    resetSwipeState();
 
-    // 需滿足水平滑動幅度大於 55px 且垂直位移小於 60px (避免滾動誤觸)
-    if (Math.abs(deltaX) > 55 && Math.abs(deltaY) < 60) {
+    // Support both deliberate gloved drag (>= 46px) and quick gloved thumb flick (>= 30px within 250ms)
+    const isValidDrag = Math.abs(deltaX) >= 46 && Math.abs(deltaY) < 68;
+    const isValidQuickFlick = Math.abs(deltaX) >= 30 && elapsedMs <= 250 && Math.abs(deltaX) > Math.abs(deltaY) * 1.4;
+
+    if (isValidDrag || isValidQuickFlick) {
       if (deltaX < 0 && onNextLesson) {
         // 向左滑動 -> 下一關
+        triggerHapticPulse(16);
         playClickSound();
+        triggerSwipeFlash('next');
         onNextLesson();
       } else if (deltaX > 0 && onPrevLesson) {
         // 向右滑動 -> 上一關
+        triggerHapticPulse(16);
         playClickSound();
+        triggerSwipeFlash('prev');
         onPrevLesson();
       }
     }
@@ -373,53 +781,39 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
     }
   };
 
-  // Keyboard navigation for ultra-fast learning
+  // Keyboard navigation for ultra-fast learning (scoped only to primary card when no modals are open)
   useEffect(() => {
+    if (disableGlobalShortcuts || isNoteModalOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      const activeElement = document.activeElement;
-      if (activeElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(activeElement.tagName)) {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const activeElement = document.activeElement as HTMLElement | null;
+      if (
+        activeElement &&
+        (['INPUT', 'TEXTAREA', 'SELECT'].includes(activeElement.tagName) ||
+          activeElement.isContentEditable)
+      ) {
         return;
       }
-      if (e.key === '1') {
-        setActiveSentenceIndex(0);
-        playClickSound();
-      } else if (e.key === '2') {
-        setActiveSentenceIndex(1);
-        playClickSound();
-      } else if (e.key === '3') {
-        setActiveSentenceIndex(2);
-        playClickSound();
-      } else if (e.key === ' ' || e.key === 'r' || e.key === 'R') {
+      if (e.key === ' ' || e.key === 'r' || e.key === 'R' || e.key === 'e' || e.key === 'E') {
         e.preventDefault();
         handleListenSpeech();
-      } else if (e.key === 'e' || e.key === 'E') {
-        e.preventDefault();
-        handleListenSpeech();
-      } else if (e.key === 'm' || e.key === 'M') {
-        handleStartMicTest();
       } else if (e.key === 's' || e.key === 'S') {
         setActiveDetailTab('svo');
         playClickSound();
       } else if (e.key === 'q' || e.key === 'Q') {
         setActiveDetailTab('quiz');
         playClickSound();
-      } else if (e.key === 'ArrowRight' || e.key === 'n' || e.key === 'N') {
+      } else if (e.key === 'n' || e.key === 'N') {
         if (onNextLesson) {
           e.preventDefault();
           playClickSound();
           onNextLesson();
         }
-      } else if (e.key === 'ArrowLeft') {
-        if (onPrevLesson) {
-          e.preventDefault();
-          playClickSound();
-          onPrevLesson();
-        }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentSentence, currentSpeed, onNextLesson, onPrevLesson]);
+  }, [disableGlobalShortcuts, isNoteModalOpen, currentSentence, currentSpeed, onNextLesson]);
 
   const handleSelectAnswer = (qIdx: number, optIdx: number) => {
     setSelectedAnswers((prev) => {
@@ -432,8 +826,10 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
     const q = practiceQuestions[qIdx];
     if (q && optIdx === q.correctIndex) {
       playSuccessChime();
+      triggerHapticPhraseComplete();
     } else {
       playClickSound();
+      triggerHapticWarning();
     }
   };
 
@@ -524,7 +920,7 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
           ? `${part}】`
           : part;
       return (
-        <span key={idx} className="inline-block whitespace-nowrap">
+        <span key={idx} className="inline-block break-words">
           {text}
         </span>
       );
@@ -618,11 +1014,17 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
       setBuilderSelectedOrder(next);
       if (next.length === targetSvoTiles.length) {
         playSuccessChime();
+        triggerHapticPhraseComplete();
       }
     } else {
       playClickSound();
+      triggerHapticWarning();
       setBuilderErrorTile(tileId);
-      setTimeout(() => setBuilderErrorTile(null), 600);
+      if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
+      errorTimerRef.current = setTimeout(() => {
+        errorTimerRef.current = null;
+        setBuilderErrorTile(null);
+      }, 600);
     }
   };
 
@@ -635,112 +1037,193 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
   return (
     <div
       onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
-      className="bg-slate-900/90 border-2 border-slate-800 rounded-2xl p-2.5 sm:p-3 pb-0 sm:pb-0 shadow-xl flex flex-col gap-2 text-slate-100 relative overflow-hidden backdrop-blur-sm w-full shrink-strict litho-border-scan"
+      onTouchCancel={resetSwipeState}
+      style={
+        swipeOffsetX !== 0
+          ? {
+              transform: `translate3d(${swipeOffsetX * 0.28}px, 0, 0)`,
+              transition: 'none',
+            }
+          : {
+              transform: 'translate3d(0, 0, 0)',
+              transition: 'transform 200ms cubic-bezier(0.22, 1, 0.36, 1)',
+            }
+      }
+      className="bg-slate-900/90 border border-slate-800 rounded-2xl shadow-xl flex flex-col text-slate-100 relative overflow-hidden backdrop-blur-sm w-full shrink-strict litho-border-scan touch-pan-y"
     >
+      {/* Mobile Cleanroom Glove Swipe Edge HUD Indicators (即時滑動邊緣視覺回饋) */}
+      <AnimatePresence>
+        {(swipeOffsetX > 10 || lastSwipeFlash === 'prev') && onPrevLesson && (
+          <motion.div
+            key="swipe-prev-hud"
+            initial={{ opacity: 0, x: -16 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -16 }}
+            transition={{ duration: 0.12 }}
+            className={`pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 z-40 px-2.5 py-2 rounded-xl border backdrop-blur-md flex items-center gap-1.5 shadow-xl ${
+              swipeActionReady === 'prev' || lastSwipeFlash === 'prev'
+                ? 'bg-amber-400 text-slate-950 border-amber-300 font-black scale-105'
+                : 'bg-slate-950/90 text-amber-300 border-amber-400/50 font-bold'
+            }`}
+          >
+            <span className="text-xs font-mono">⟪</span>
+            <span className="text-xs font-mono whitespace-nowrap">
+              {swipeActionReady === 'prev' || lastSwipeFlash === 'prev' ? '放開回上一關' : '右滑上一關'}
+            </span>
+          </motion.div>
+        )}
+
+        {(swipeOffsetX < -10 || lastSwipeFlash === 'next') && onNextLesson && (
+          <motion.div
+            key="swipe-next-hud"
+            initial={{ opacity: 0, x: 16 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 16 }}
+            transition={{ duration: 0.12 }}
+            className={`pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 z-40 px-2.5 py-2 rounded-xl border backdrop-blur-md flex items-center gap-1.5 shadow-xl ${
+              swipeActionReady === 'next' || lastSwipeFlash === 'next'
+                ? 'bg-cyan-400 text-slate-950 border-cyan-300 font-black scale-105'
+                : 'bg-slate-950/90 text-cyan-300 border-cyan-400/50 font-bold'
+            }`}
+          >
+            <span className="text-xs font-mono whitespace-nowrap">
+              {swipeActionReady === 'next' || lastSwipeFlash === 'next' ? '放開進下一關' : '左滑下一關'}
+            </span>
+            <span className="text-xs font-mono">⟫</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
       {/* Header Section: Cleanroom Scenario Card Flush to Top Frame */}
-      <div className="-mx-2.5 sm:-mx-3 -mt-2.5 sm:-mt-3 px-3 py-1.5 sm:px-3.5 sm:py-2 bg-slate-950/95 border-b border-slate-800/90 rounded-t-2xl shadow-sm flex items-center justify-between gap-2 flex-wrap">
-        <div className="flex items-center gap-2 min-w-0 flex-1">
-          <span className="text-[11px] font-mono font-bold text-amber-400 shrink-0 tracking-wide">
+      <div className="px-3 sm:px-4 py-2.5 bg-slate-950/95 border-b border-slate-800/90 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <div className="flex items-start sm:items-center gap-1.5 sm:gap-2 min-w-0 flex-1">
+          <span className="text-[11px] font-mono font-bold text-amber-400 shrink-0 tracking-wide mt-0.5 sm:mt-0">
             實戰情境 ·
           </span>
-          <h3 className="text-xs sm:text-sm font-black text-slate-100 leading-snug break-words">
+          <h3 className="text-xs sm:text-sm font-black text-slate-100 leading-snug break-words flex-1 min-w-0">
             {lesson.scenario
               .replace(/^🎬\s*情境：/, '')
               .replace(/^🎬\s*/, '')
               .replace(/\s*[\(（][^\)）]*[\)）]/g, '')}
           </h3>
           {isVisited && (
-            <span className="text-[10px] font-mono font-bold text-emerald-400 flex items-center gap-0.5 shrink-0">
+            <span className="text-[10px] font-mono font-bold text-emerald-400 flex items-center gap-0.5 shrink-0 mt-0.5 sm:mt-0">
               <CheckCircle2 className="w-3 h-3 text-emerald-400" />
               <span>已讀</span>
             </span>
           )}
         </div>
 
-        {/* Header Action Buttons (Level Picker, Bilingual, Note, Bookmark, Copy) */}
-        <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+        {/* Simplified Header Actions: Level Picker + Bookmark + More Menu */}
+        <div ref={moreActionsRef} className="grid grid-cols-3 sm:flex items-center gap-1.5 w-full sm:w-auto shrink-0 relative">
           {typeof currentIndex === 'number' && typeof totalLessons === 'number' && (
             <button
               type="button"
+              aria-expanded={isLevelPickerOpen}
               onClick={() => {
                 playClickSound();
                 setIsLevelPickerOpen((prev) => !prev);
               }}
-              className={`px-2 py-0.8 rounded-lg border text-xs font-mono font-bold tabular-nums transition-all cursor-pointer flex items-center gap-1 shadow-xs whitespace-nowrap ${
+              className={`min-h-[34px] px-2 sm:px-2.5 py-1 rounded-lg border text-xs font-mono font-bold tabular-nums transition-all cursor-pointer flex items-center justify-center gap-1 whitespace-nowrap ${
                 isLevelPickerOpen
                   ? 'bg-cyan-400 text-slate-950 border-cyan-300 font-black'
                   : 'bg-slate-900 hover:bg-slate-800 text-cyan-300 border-cyan-500/40'
               }`}
-              title="展開關卡快速跳轉總覽"
+              title="展開關卡快速跳轉"
             >
-              <LayoutGrid className="w-3 h-3" />
+              <LayoutGrid className="w-3.5 h-3.5 shrink-0" />
               <span>選關 {currentIndex + 1}/{totalLessons}</span>
               <span className="text-[9px]">{isLevelPickerOpen ? '▴' : '▾'}</span>
             </button>
           )}
 
           <button
-            onClick={handleListenBilingual}
-            className="px-2 py-0.8 rounded-lg bg-slate-900 hover:bg-slate-800 text-cyan-300 hover:text-cyan-200 border border-slate-700 text-xs font-bold transition-all cursor-pointer flex items-center gap-1 shadow-xs whitespace-nowrap"
-            title="中英雙語對照朗讀"
-          >
-            <Headphones className="w-3 h-3 text-cyan-400" />
-            <span className="hidden sm:inline">雙語</span>
-          </button>
-
-          <button
-            onClick={() => {
-              playClickSound();
-              setTempNoteText(currentLessonNote);
-              setIsNoteModalOpen(true);
-            }}
-            className={`px-2 py-0.8 rounded-lg border text-xs font-bold transition-all cursor-pointer flex items-center gap-1 shadow-xs whitespace-nowrap ${
-              currentLessonNote
-                ? 'bg-amber-500/20 text-amber-300 border-amber-500/50'
-                : 'bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border-slate-700'
-            }`}
-            title="新增或修改個人交接筆記"
-          >
-            <StickyNote className="w-3 h-3 text-amber-400" />
-            <span className="hidden sm:inline">筆記</span>
-          </button>
-
-          <button
+            type="button"
+            aria-pressed={isBookmarked}
             onClick={() => {
               playClickSound();
               onToggleBookmark(lesson);
               showBookmarkToast(!isBookmarked, lesson.scenario);
             }}
-            className={`px-2 py-0.8 rounded-lg border text-xs font-bold transition-all cursor-pointer flex items-center gap-1 shadow-xs whitespace-nowrap ${
+            className={`min-h-[34px] px-2 sm:px-2.5 py-1 rounded-lg border text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1 whitespace-nowrap ${
               isBookmarked
                 ? 'bg-amber-400/20 text-amber-300 border-amber-400/50'
                 : 'bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border-slate-700'
             }`}
-            title={isBookmarked ? '取消收藏本關卡' : '加入收藏夾'}
+            title={isBookmarked ? '取消收藏' : '加入收藏'}
           >
-            <Bookmark className={`w-3 h-3 ${isBookmarked ? 'fill-amber-400 text-amber-400' : ''}`} />
-            <span className="hidden sm:inline">{isBookmarked ? '已藏' : '收藏'}</span>
+            <Bookmark className={`w-3.5 h-3.5 shrink-0 ${isBookmarked ? 'fill-amber-400 text-amber-400' : ''}`} />
+            <span>{isBookmarked ? '已藏' : '收藏'}</span>
           </button>
 
           <button
-            onClick={handleCopy}
-            className="px-2 py-0.8 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-200 hover:text-white border border-slate-700 text-xs font-bold transition-all cursor-pointer flex items-center gap-1 shadow-xs whitespace-nowrap"
-            title="複製句型與記憶技巧"
+            type="button"
+            aria-expanded={isMoreActionsOpen}
+            onClick={() => {
+              playClickSound();
+              setIsMoreActionsOpen((prev) => !prev);
+            }}
+            className={`min-h-[34px] px-2 sm:px-2.5 py-1 rounded-lg border text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1 whitespace-nowrap ${
+              isMoreActionsOpen
+                ? 'bg-amber-400 text-slate-950 border-amber-300'
+                : 'bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border-slate-700'
+            }`}
+            title="更多操作（雙語朗讀、筆記、複製）"
           >
-            {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-            <span className="hidden sm:inline">{copied ? '已複製' : '複製'}</span>
+            <SlidersHorizontal className="w-3.5 h-3.5 shrink-0" />
+            <span>更多</span>
           </button>
+
+          {isMoreActionsOpen && (
+            <div className="absolute right-0 top-9 z-40 w-44 bg-slate-950 border border-slate-700 rounded-xl shadow-2xl p-1.5 space-y-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsMoreActionsOpen(false);
+                  handleListenBilingual();
+                }}
+                className="w-full px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-cyan-300 text-xs font-bold flex items-center gap-2 cursor-pointer text-left"
+              >
+                <Headphones className="w-3.5 h-3.5" />
+                <span>雙語朗讀（中+英）</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsMoreActionsOpen(false);
+                  playClickSound();
+                  setTempNoteText(currentLessonNote);
+                  setIsNoteModalOpen(true);
+                }}
+                className="w-full px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-amber-300 text-xs font-bold flex items-center gap-2 cursor-pointer text-left"
+              >
+                <StickyNote className="w-3.5 h-3.5" />
+                <span>{currentLessonNote ? '編輯交接筆記' : '新增交接筆記'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsMoreActionsOpen(false);
+                  handleCopy();
+                }}
+                className="w-full px-2.5 py-1.5 rounded-lg hover:bg-slate-800 text-slate-200 text-xs font-bold flex items-center gap-2 cursor-pointer text-left"
+              >
+                {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{copied ? '已複製內容' : '複製句型筆記'}</span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
       {/* Main 2-Column Integrated Balanced Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-12 gap-2.5 items-stretch">
+      <div className="p-3 sm:p-4 grid grid-cols-1 md:grid-cols-12 gap-3 sm:gap-4 items-stretch">
         
         {/* Left Column: Active Sentence Hero Display & Speech Player */}
-        <div className="md:col-span-6 space-y-1.5 flex flex-col min-w-0 h-full">
-          <div className="bg-slate-950/95 rounded-xl border border-slate-800 p-2.5 pb-0 sm:p-3 sm:pb-0 flex flex-col relative gap-2 glow-cyan min-w-0 flex-1 justify-between overflow-hidden">
-            
+        <div className="md:col-span-6 space-y-2 flex flex-col min-w-0 h-full">
+          <div className="bg-slate-950/90 rounded-xl border border-slate-800 flex flex-col relative min-w-0 flex-1 justify-between overflow-hidden">
+            <div className="p-3 sm:p-3.5 flex flex-col gap-2.5 flex-1">
             {/* Sentence Switcher & Tag Badges */}
             <div className="flex items-center justify-between w-full flex-wrap gap-1 pb-1 border-b border-slate-800/80">
               <div className="flex items-center gap-1 w-full">
@@ -759,6 +1242,7 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
                       onClick={() => {
                         playClickSound();
                         setActiveSentenceIndex(idx);
+                        setReadingWordIndex(null);
                         setUserTranscript(null);
                         setSpeechScore(null);
                       }}
@@ -791,43 +1275,62 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
               components={activeComponents}
               highlightSvo={highlightSvo}
               onSelectSvoRole={(role) => setHighlightSvo(role)}
+              activeReadingWordIndex={readingWordIndex}
               speechSpeed={currentSpeed}
             />
 
-            {/* Unified Trilingual Pronunciation & Translation Panel - 高對比呈現 + 遮中文自測模式 */}
-            <div className="w-full bg-slate-900/95 border border-slate-800 rounded-xl p-2 sm:p-2.5 space-y-1.5 shadow-sm">
+            {/* Unified Trilingual Pronunciation & Translation Panel - 清潔分割排版 + 遮中文自測模式 */}
+            <div className="w-full bg-slate-900/75 border border-slate-800/90 rounded-xl overflow-hidden divide-y divide-slate-800/70">
               {/* Chinese Meaning Row + Self-Test Mask Toggle */}
-              <div className="flex items-center justify-between gap-2">
+              <div className="px-3 py-2.5 flex items-center justify-between gap-2">
                 <div
+                  role="button"
+                  tabIndex={0}
+                  aria-label={isMaskingHelper ? '揭曉中文與諧音提示' : '點擊朗讀中文句意'}
                   onClick={() => {
                     if (isMaskingHelper) {
                       playClickSound();
                       setIsMaskingHelper(false);
+                    } else {
+                      playClickSound();
+                      speakChinese(currentSentence.chinese, 1.0);
                     }
                   }}
-                  className={`flex items-center gap-1.5 text-slate-100 font-extrabold text-xs sm:text-sm leading-snug min-w-0 flex-1 ${
-                    isMaskingHelper ? 'cursor-pointer select-none' : ''
-                  }`}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      playClickSound();
+                      if (isMaskingHelper) {
+                        setIsMaskingHelper(false);
+                      } else {
+                        speakChinese(currentSentence.chinese, 1.0);
+                      }
+                    }
+                  }}
+                  className="flex items-center gap-2 text-slate-100 font-extrabold text-xs sm:text-sm leading-snug min-w-0 flex-1 rounded cursor-pointer hover:opacity-90 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+                  title={isMaskingHelper ? '點擊揭曉中文與諧音' : '點擊聆聽中文句意朗讀'}
                 >
-                  <span className="px-1.5 py-0.2 rounded bg-amber-400/25 text-amber-300 text-[10px] font-mono font-black shrink-0 border border-amber-400/40">
-                    中文
+                  <span className="px-1.5 py-0.5 rounded bg-amber-400/20 text-amber-300 text-[10px] font-mono font-black shrink-0 border border-amber-400/35 leading-none flex items-center gap-1">
+                    <Volume2 className="w-2.5 h-2.5 text-amber-300" />
+                    <span>中文</span>
                   </span>
                   {isMaskingHelper ? (
                     <span className="px-2 py-0.5 rounded bg-slate-800 border border-dashed border-amber-400/40 text-amber-300/90 text-xs font-mono">
                       已遮蔽（點擊揭曉）
                     </span>
                   ) : (
-                    <span className="break-words font-sans text-amber-300 font-black">{currentSentence.chinese}</span>
+                    <span className="break-words font-sans text-amber-300 font-bold">{currentSentence.chinese}</span>
                   )}
                 </div>
 
                 <button
                   type="button"
+                  aria-pressed={isMaskingHelper}
                   onClick={() => {
                     playClickSound();
                     setIsMaskingHelper((prev) => !prev);
                   }}
-                  className={`px-2 py-0.5 rounded-md border text-[10px] font-mono font-bold cursor-pointer transition-all shrink-0 whitespace-nowrap ${
+                  className={`min-h-[28px] px-2.5 py-1 rounded-lg border text-[11px] font-mono font-bold cursor-pointer transition-colors shrink-0 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${
                     isMaskingHelper
                       ? 'bg-amber-400 text-slate-950 border-amber-300 font-black'
                       : 'bg-slate-950 hover:bg-slate-800 text-slate-300 border-slate-700'
@@ -838,7 +1341,7 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
                 </button>
               </div>
 
-              {/* Phonetic Pronunciation Rows - 完整呈現 KK音標、注音與標音文字，音節與括號絕不落單斷行 */}
+              {/* Phonetic Pronunciation Rows - 清潔微分割取代多層 nested box + 點擊即可發音 */}
               {!isMaskingHelper && (() => {
                 const cleanKK = getSentenceKKPhonetic(currentSentence.english);
                 const kkGroups = cleanKK.split(/\s*[｜|]\s*/).filter(Boolean);
@@ -851,21 +1354,33 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
                 const zhuyinGroups = cleanZhuyin.split(/\s*[｜|]\s*/).filter(Boolean);
                 const homophoneGroups = cleanHomophone.split(/\s*[｜|]\s*/).filter(Boolean);
                 return (
-                  <div className="space-y-1.5 pt-1.5 border-t border-slate-800/80 text-xs">
-                    {/* KK音標 */}
+                  <div className="divide-y divide-slate-800/60 text-xs">
+                    {/* KK音標 - 點擊觸發 0.78x 強化重音清晰發音 */}
                     {kkGroups.length > 0 && (
-                      <div className="flex items-center gap-2 bg-cyan-950/60 px-2.5 py-1.5 rounded-lg border border-cyan-500/40 min-w-0">
-                        <span className="px-1.5 py-0.5 rounded bg-cyan-500/25 text-cyan-200 text-[10px] font-black shrink-0 border border-cyan-400/50">
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        onClick={handleListenEnhancedPronunciation}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            handleListenEnhancedPronunciation();
+                          }
+                        }}
+                        title="點擊以 0.78x 強化咬字模式朗讀 KK 音標"
+                        className="flex items-start sm:items-center gap-2 px-2.5 sm:px-3 py-2 bg-cyan-950/20 hover:bg-cyan-950/35 transition-colors cursor-pointer min-w-0"
+                      >
+                        <span className="w-11 sm:w-12 text-center py-0.5 rounded bg-cyan-500/15 text-cyan-300 text-[10px] font-bold shrink-0 border border-cyan-500/30 leading-none mt-0.5 sm:mt-0">
                           KK音標
                         </span>
-                        <div className="text-cyan-200 font-mono font-black tracking-wide text-xs sm:text-[13px] leading-snug flex flex-wrap items-center gap-x-1 gap-y-0.5 min-w-0 flex-1 select-text">
+                        <div className="text-cyan-200 font-mono font-bold tracking-wide text-xs sm:text-[13px] leading-snug flex flex-wrap items-center gap-x-1 gap-y-0.5 min-w-0 flex-1 select-text">
                           {kkGroups.map((grp, gIdx) => (
                             <React.Fragment key={gIdx}>
-                              <span className="inline-block whitespace-nowrap">
+                              <span className="inline-block break-words">
                                 {grp}
                               </span>
                               {gIdx < kkGroups.length - 1 && (
-                                <span className="text-cyan-500/70 font-normal">｜</span>
+                                <span className="text-cyan-500/60 font-normal">｜</span>
                               )}
                             </React.Fragment>
                           ))}
@@ -873,21 +1388,33 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
                       </div>
                     )}
 
-                    {/* 注音諧音 */}
+                    {/* 注音諧音 - 點擊觸發 0.7x 慢速清晰導讀 */}
                     {zhuyinGroups.length > 0 && (
-                      <div className="flex items-center gap-2 bg-indigo-950/70 px-2.5 py-1.5 rounded-lg border border-indigo-500/40 min-w-0">
-                        <span className="px-1.5 py-0.5 rounded bg-indigo-500/25 text-indigo-200 text-[10px] font-black shrink-0 border border-indigo-400/50">
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => handleListenSpeech(0.7, undefined, true)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            handleListenSpeech(0.7, undefined, true);
+                          }
+                        }}
+                        title="點擊對照注音以 0.7x 慢速清晰發音"
+                        className="flex items-start sm:items-center gap-2 px-2.5 sm:px-3 py-2 bg-indigo-950/20 hover:bg-indigo-950/35 transition-colors cursor-pointer min-w-0"
+                      >
+                        <span className="w-11 sm:w-12 text-center py-0.5 rounded bg-indigo-500/15 text-indigo-200 text-[10px] font-bold shrink-0 border border-indigo-400/30 leading-none mt-0.5 sm:mt-0">
                           注音
                         </span>
-                        <div className="text-yellow-300 font-mono font-black tracking-wide text-xs sm:text-[13px] leading-snug flex flex-wrap items-center gap-x-1 gap-y-0.5 min-w-0 flex-1 select-text">
+                        <div className="text-yellow-300 font-mono font-bold tracking-wide text-xs sm:text-[13px] leading-snug flex flex-wrap items-center gap-x-1 gap-y-0.5 min-w-0 flex-1 select-text">
                           {zhuyinGroups.map((grp, gIdx) => (
                             <React.Fragment key={gIdx}>
-                              <span className="inline-block whitespace-nowrap">
+                              <span className="inline-block break-words">
                                 {gIdx === 0 ? `【 ${grp}` : grp}
                                 {gIdx === zhuyinGroups.length - 1 ? ' 】' : ''}
                               </span>
                               {gIdx < zhuyinGroups.length - 1 && (
-                                <span className="text-indigo-400/80 font-normal">｜</span>
+                                <span className="text-indigo-400/60 font-normal">｜</span>
                               )}
                             </React.Fragment>
                           ))}
@@ -895,21 +1422,33 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
                       </div>
                     )}
 
-                    {/* 中文標音 */}
+                    {/* 中文標音 - 點擊觸發 0.7x 慢速清晰導讀 */}
                     {homophoneGroups.length > 0 && (
-                      <div className="flex items-center gap-2 bg-emerald-950/60 px-2.5 py-1.5 rounded-lg border border-emerald-500/40 min-w-0">
-                        <span className="px-1.5 py-0.5 rounded bg-emerald-500/25 text-emerald-200 text-[10px] font-black shrink-0 border border-emerald-400/50">
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => handleListenSpeech(0.7, undefined, true)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            handleListenSpeech(0.7, undefined, true);
+                          }
+                        }}
+                        title="點擊對照台味諧音以 0.7x 慢速清晰發音"
+                        className="flex items-start sm:items-center gap-2 px-2.5 sm:px-3 py-2 bg-emerald-950/20 hover:bg-emerald-950/35 transition-colors cursor-pointer min-w-0"
+                      >
+                        <span className="w-11 sm:w-12 text-center py-0.5 rounded bg-emerald-500/15 text-emerald-200 text-[10px] font-bold shrink-0 border border-emerald-400/30 leading-none mt-0.5 sm:mt-0">
                           諧音
                         </span>
-                        <div className="text-emerald-300 font-mono font-black text-xs sm:text-[13px] leading-snug flex flex-wrap items-center gap-x-1 gap-y-0.5 min-w-0 flex-1 select-text">
+                        <div className="text-emerald-300 font-mono font-bold text-xs sm:text-[13px] leading-snug flex flex-wrap items-center gap-x-1 gap-y-0.5 min-w-0 flex-1 select-text">
                           {homophoneGroups.map((grp, gIdx) => (
                             <React.Fragment key={gIdx}>
-                              <span className="inline-block whitespace-nowrap">
+                              <span className="inline-block break-words">
                                 {gIdx === 0 ? `【 ${grp}` : grp}
                                 {gIdx === homophoneGroups.length - 1 ? ' 】' : ''}
                               </span>
                               {gIdx < homophoneGroups.length - 1 && (
-                                <span className="text-emerald-500/70 font-normal">｜</span>
+                                <span className="text-emerald-500/60 font-normal">｜</span>
                               )}
                             </React.Fragment>
                           ))}
@@ -921,37 +1460,64 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
               })()}
             </div>
 
-            {/* 圖片與畫面記憶區塊 (晶圓廠實境圖解記憶法) */}
+            {/* Collapsible Memory Trick Accordion */}
             {lesson.memory_trick && (
-              <div className="w-full bg-slate-900/90 border border-amber-500/35 rounded-xl p-2 sm:p-2.5 shadow-sm space-y-1">
+              <div className="w-full bg-slate-900/90 border border-amber-500/35 rounded-xl px-2.5 py-2 shadow-sm">
                 <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-1.5 text-amber-300 font-black text-xs">
-                    <Cpu className="w-3.5 h-3.5 text-amber-400" />
-                    <span>記憶口訣</span>
-                  </div>
-                  <span className="text-[10px] font-mono text-amber-300/80">
-                    單音速記
-                  </span>
+                  <button
+                    type="button"
+                    aria-expanded={showMemoryTrick}
+                    onClick={() => {
+                      playClickSound();
+                      setShowMemoryTrick((prev) => !prev);
+                    }}
+                    className="flex-1 flex items-center justify-between gap-2 cursor-pointer text-left rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+                  >
+                    <div className="flex items-center gap-1.5 text-amber-300 font-black text-xs">
+                      <Cpu className="w-3.5 h-3.5 text-amber-400" />
+                      <span>記憶口訣</span>
+                    </div>
+                    <span className="text-[11px] font-mono text-amber-300/90 whitespace-nowrap">
+                      {showMemoryTrick ? '收合 ▴' : '展開口訣 ▾'}
+                    </span>
+                  </button>
+                  {showMemoryTrick && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        playClickSound();
+                        speakChinese(lesson.memory_trick.replace(/➔/g, '，'), 1.0);
+                      }}
+                      className="px-2 py-0.5 rounded bg-amber-400/15 hover:bg-amber-400/25 border border-amber-400/40 text-amber-300 text-[10px] font-mono font-bold flex items-center gap-1 cursor-pointer shrink-0"
+                      title="語音朗讀記憶口訣"
+                    >
+                      <Volume2 className="w-3 h-3" />
+                      <span>聽口訣</span>
+                    </button>
+                  )}
                 </div>
-                
-                {/* 簡化排版：若含 ➔ 箭頭則分段流暢呈現，不擁擠 */}
-                {lesson.memory_trick.includes('➔') ? (
-                  <div className="flex flex-wrap items-center gap-1 text-[11px]">
-                    {lesson.memory_trick.replace(/簽簿/g, '錢伯/簽簿').split('➔').map((step, sIdx, arr) => (
-                      <React.Fragment key={sIdx}>
-                        <div className="px-1.5 py-0.5 rounded-md bg-slate-950/80 border border-amber-500/20 text-slate-200 font-sans leading-tight">
-                          {step.trim()}
-                        </div>
-                        {sIdx < arr.length - 1 && (
-                          <span className="text-amber-400 font-black text-[10px]">➔</span>
-                        )}
-                      </React.Fragment>
-                    ))}
+
+                {showMemoryTrick && (
+                  <div className="pt-2 mt-1.5 border-t border-slate-800/80">
+                    {lesson.memory_trick.includes('➔') ? (
+                      <div className="flex flex-wrap items-center gap-1 text-[11px]">
+                        {lesson.memory_trick.replace(/簽簿/g, '錢伯/簽簿').split('➔').map((step, sIdx, arr) => (
+                          <React.Fragment key={sIdx}>
+                            <div className="px-1.5 py-0.5 rounded-md bg-slate-950/80 border border-amber-500/20 text-slate-200 font-sans leading-tight">
+                              {step.trim()}
+                            </div>
+                            {sIdx < arr.length - 1 && (
+                              <span className="text-amber-400 font-black text-[10px]">➔</span>
+                            )}
+                          </React.Fragment>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-slate-200 font-sans leading-relaxed break-words text-[11px]">
+                        {lesson.memory_trick.replace(/簽簿/g, '錢伯/簽簿')}
+                      </p>
+                    )}
                   </div>
-                ) : (
-                  <p className="text-slate-200 font-sans leading-relaxed break-words text-[11px]">
-                    {lesson.memory_trick.replace(/簽簿/g, '錢伯/簽簿')}
-                  </p>
                 )}
               </div>
             )}
@@ -972,22 +1538,39 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
               </div>
             )}
 
-            {/* Dynamic Sequential Speech Queue Progress Bar with Real-time Countdown */}
+            {/* Dynamic Sequential Speech Queue Progress Bar with Real-time State Machine & Countdown */}
             {isQueuePlaying && (
               <div className="w-full space-y-1 pt-1 border-t border-slate-800/80">
-                <div className="flex items-center justify-between text-[10px] font-mono px-0.5">
+                <div className="flex items-center justify-between text-[10px] font-mono px-0.5 flex-wrap gap-1">
                   <div className="flex items-center gap-1.5 font-bold">
                     <span className="flex items-center gap-1 text-cyan-300">
-                      <span className="relative flex h-2 w-2">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500"></span>
-                      </span>
+                      <Volume2 className="w-3 h-3 text-cyan-400 shrink-0" />
                       <span>
-                        {(currentTask?.rawText === currentSentence.english || currentTask?.text === cleanEnglishText(currentSentence.english))
+                        {enginePhase === 'BUFFERING'
+                          ? '預緩衝載入中'
+                          : enginePhase === 'INTER_SENTENCE_BUFFER'
+                          ? '句間韻律緩衝'
+                          : enginePhase === 'RECOVERING'
+                          ? '雙通道自癒切換'
+                          : (currentTask?.rawText === currentSentence.english || currentTask?.text === cleanEnglishText(currentSentence.english))
                           ? '正在朗讀本句'
                           : '佇列連播中'}
                       </span>
                     </span>
+                    <span className="px-1.5 py-0.2 rounded bg-slate-950 border border-cyan-500/30 text-emerald-300 text-[9px] font-mono">
+                      {enginePhase === 'PLAYING_CLOUD'
+                        ? 'HD預緩衝'
+                        : enginePhase === 'PLAYING_NATIVE'
+                        ? '本機引擎'
+                        : enginePhase === 'BUFFERING'
+                        ? 'RAM緩衝'
+                        : '穩定排程'}
+                    </span>
+                    {queueCurrentWord && queueWordIndex >= 0 && (
+                      <span className="px-1.5 py-0.2 rounded bg-amber-400/20 border border-amber-400/40 text-amber-300 text-[9px] font-mono font-black">
+                        {queueCurrentWord} ({queueWordIndex + 1}/{Math.max(1, queueTotalWords)})
+                      </span>
+                    )}
                   </div>
                   
                   {/* Real-time Countdown and Queue remaining badges */}
@@ -1019,44 +1602,63 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
               </div>
             )}
 
+            </div>
             {/* Audio Action Bar - Dedicated Anchored Bottom Row (完整呈現不裁切) */}
-            <div className="w-full -mx-2.5 sm:-mx-3 mt-auto px-2 py-1.5 sm:px-2.5 sm:py-1.5 bg-slate-900/95 border-t border-slate-800/90 shadow-inner">
-              <div className="w-full flex items-center justify-between gap-1 flex-wrap">
+            <div className="w-full mt-auto px-2.5 sm:px-3 py-2 bg-slate-900/95 border-t border-slate-800/90">
+              <div className="w-full flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 {/* Speed Presets */}
-                <div className="h-7 flex items-center gap-0.5 bg-slate-950/90 p-0.5 rounded-md border border-slate-800 shrink-0 shadow-inner tabular-nums">
+                <div className="min-h-[34px] grid grid-cols-4 sm:flex items-center gap-0.5 bg-slate-950/90 p-0.5 rounded-lg border border-slate-800 shrink-0 tabular-nums">
                   {[0.7, 0.85, 1.0, 1.2].map((spd) => (
                     <button
                       key={spd}
+                      type="button"
+                      aria-pressed={currentSpeed === spd}
                       onClick={() => {
                         setCurrentSpeed(spd);
-                        handleListenSpeech(spd);
+                        handleListenSpeech(spd, undefined, true);
                       }}
-                      className={`h-6 px-1.5 flex items-center justify-center rounded text-[10px] font-mono font-bold cursor-pointer transition-all active:scale-95 touch-manipulation whitespace-nowrap ${
+                      className={`h-7 px-2 flex items-center justify-center rounded-md text-[11px] font-mono font-bold cursor-pointer transition-colors active:scale-95 touch-manipulation whitespace-nowrap focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${
                         currentSpeed === spd
-                          ? 'bg-amber-400 text-slate-950 font-black shadow-xs ring-1 ring-amber-300'
-                          : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                          ? 'bg-amber-400 text-slate-950 font-black shadow-xs'
+                          : 'text-slate-400 hover:text-white hover:bg-slate-800/70'
                       }`}
-                      title={`以 ${spd}x 語速播放`}
+                      title={`以 ${spd}x 語速立即播放`}
                     >
                       {spd}x
                     </button>
                   ))}
                 </div>
 
-                <div className="flex items-center gap-1 flex-1 justify-end min-w-0">
+                <div className="grid grid-cols-4 sm:flex items-center gap-1.5 flex-1 sm:justify-end min-w-0">
+                  {/* ⚡ 強化咬字重音導讀 (0.78x) */}
+                  <button
+                    type="button"
+                    aria-pressed={isEnhancedPlaying}
+                    onClick={handleListenEnhancedPronunciation}
+                    className={`min-h-[34px] px-2 sm:px-2.5 rounded-lg border text-[11px] font-mono font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors shrink-0 active:scale-95 whitespace-nowrap ${
+                      isEnhancedPlaying
+                        ? 'bg-emerald-400 text-slate-950 border-emerald-300 font-black'
+                        : 'bg-slate-950 hover:bg-slate-800 text-emerald-300 border-emerald-500/40'
+                    }`}
+                    title="0.78x 強化咬字模式：加重單字重音與無塵室抗噪穿透力 (快捷鍵 E)"
+                  >
+                    <Zap className="w-3 h-3 shrink-0" />
+                    <span>強化</span>
+                  </button>
+
                   {/* 🔁 零基礎三速漸進帶讀 (慢->中->快) */}
                   <button
                     type="button"
                     onClick={handleListenThreeSpeedDrill}
-                    className={`h-7 px-2 rounded-md border text-[10px] font-mono font-bold flex items-center gap-1 cursor-pointer transition-all shrink-0 active:scale-95 whitespace-nowrap ${
+                    className={`min-h-[34px] px-2 sm:px-2.5 rounded-lg border text-[11px] font-mono font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors shrink-0 active:scale-95 whitespace-nowrap ${
                       isThreeSpeedPlaying
-                        ? 'bg-amber-400 text-slate-950 border-amber-300 font-black animate-pulse'
+                        ? 'bg-amber-400 text-slate-950 border-amber-300 font-black'
                         : 'bg-slate-950 hover:bg-slate-800 text-amber-300 border-amber-500/40'
                     }`}
-                    title="零基礎三遍漸進帶讀：0.68x慢聽 ➔ 0.85x跟讀 ➔ 1.0x實戰"
+                    title="零基礎三遍漸進帶讀：0.7x慢聽 ➔ 0.85x跟讀 ➔ 1.0x實戰"
                   >
-                    <RefreshCw className={`w-3 h-3 shrink-0 ${isThreeSpeedPlaying ? 'animate-spin' : ''}`} />
-                    <span>{isThreeSpeedPlaying ? `${threeSpeedStage}/3` : '三速'}</span>
+                    <RefreshCw className={`w-3 h-3 shrink-0 ${isThreeSpeedPlaying ? 'motion-safe:animate-spin' : ''}`} />
+                    <span className="tabular-nums">{isThreeSpeedPlaying ? `${threeSpeedStage}/3` : '三速'}</span>
                   </button>
 
                   {/* 🎤 開口跟讀檢測 */}
@@ -1064,9 +1666,9 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
                     type="button"
                     onClick={handleStartMicTest}
                     disabled={isListening}
-                    className={`h-7 px-2 rounded-md border text-[10px] font-mono font-bold flex items-center gap-1 cursor-pointer transition-all shrink-0 active:scale-95 whitespace-nowrap ${
+                    className={`min-h-[34px] px-2 sm:px-2.5 rounded-lg border text-[11px] font-mono font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors shrink-0 active:scale-95 whitespace-nowrap ${
                       isListening
-                        ? 'bg-rose-500 text-white border-rose-400 font-black animate-pulse'
+                        ? 'bg-rose-500 text-white border-rose-400 font-black'
                         : 'bg-slate-950 hover:bg-slate-800 text-cyan-300 border-cyan-500/40'
                     }`}
                     title="點擊開口跟讀，即時比對發音準確度 (快捷鍵 M)"
@@ -1075,26 +1677,26 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
                     <span>{isListening ? '聆聽中' : '跟讀'}</span>
                   </button>
 
-                  {/* 主發音按鈕 (保證完整顯示「🔊 發音」絕不裁切) */}
+                  {/* 主發音按鈕 */}
                   <button
+                    type="button"
+                    aria-pressed={isPlaying}
                     onClick={() => handleListenSpeech()}
-                    className={`h-7 shrink-0 px-3 rounded-md font-bold text-xs flex items-center justify-center gap-1 shadow-sm transition-all cursor-pointer active:scale-[0.98] touch-manipulation relative group overflow-hidden whitespace-nowrap ${
+                    className={`min-h-[34px] shrink-0 px-2.5 sm:px-3.5 rounded-lg font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm transition-all cursor-pointer active:scale-[0.98] touch-manipulation relative group overflow-hidden whitespace-nowrap focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
                       isPlaying
-                        ? 'bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 text-slate-950 ring-1 ring-amber-300 shadow-amber-500/25'
-                        : 'bg-gradient-to-r from-cyan-400 via-teal-400 to-emerald-400 hover:brightness-110 text-slate-950 shadow-cyan-500/15 ring-1 ring-cyan-300/80 hover:shadow-cyan-400/25'
+                        ? 'bg-amber-400 text-slate-950 ring-1 ring-amber-300'
+                        : 'bg-gradient-to-r from-cyan-400 to-teal-400 hover:brightness-110 text-slate-950'
                     }`}
                     title={isPlaying ? "點擊停止 (快捷鍵 Space)" : "點擊發音 (快捷鍵 Space)"}
                   >
-                    <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-700 ease-in-out pointer-events-none" />
-
                     {isPlaying ? (
                       <>
-                        <Square className="w-3 h-3 fill-slate-950 text-slate-950 animate-pulse shrink-0" />
+                        <Square className="w-3 h-3 fill-slate-950 text-slate-950 shrink-0" />
                         <span className="font-black tracking-wide text-xs">停止</span>
                       </>
                     ) : (
                       <>
-                        <Volume2 className="w-3.5 h-3.5 text-slate-950 stroke-[2.2] shrink-0 group-hover:scale-105 transition-transform" />
+                        <Volume2 className="w-3.5 h-3.5 text-slate-950 stroke-[2.2] shrink-0" />
                         <span className="tracking-wide font-black text-xs">發音</span>
                       </>
                     )}
@@ -1104,7 +1706,7 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
             </div>
           </div>
 
-          {/* User Transcript & Comparison Feedback */}
+          {/* User Transcript & Word-by-Word Pronunciation Diagnostic Feedback */}
           {userTranscript && (
             <div className={`p-2.5 rounded-xl border text-xs font-medium space-y-1.5 animate-fade-in ${
               speechMatch
@@ -1113,25 +1715,63 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
             }`}>
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <span className="font-extrabold flex items-center gap-1.5">
-                  {speechMatch ? '發音高度相符！' : '可再加強朗讀'}
+                  {speechMatch ? '發音高度相符！' : '可點擊下方單字針對強化練習'}
                   {speechScore !== null && (
                     <span className="text-[11px] font-mono font-black tabular-nums">
                       · 準確率 {speechScore}%
                     </span>
                   )}
                 </span>
-                <button
-                  onClick={() => handleListenSpeech()}
-                  className="px-2 py-0.5 rounded bg-black/40 text-[10px] font-bold border border-current hover:bg-black/60 flex items-center gap-1 cursor-pointer whitespace-nowrap"
-                >
-                  <Volume2 className="w-3 h-3" />
-                  <span>聽標準音</span>
-                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={handleListenEnhancedPronunciation}
+                    className="px-2 py-0.5 rounded bg-black/40 text-[10px] font-bold border border-current hover:bg-black/60 flex items-center gap-1 cursor-pointer whitespace-nowrap"
+                  >
+                    <Zap className="w-3 h-3" />
+                    <span>慢速強化</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleListenSpeech()}
+                    className="px-2 py-0.5 rounded bg-black/40 text-[10px] font-bold border border-current hover:bg-black/60 flex items-center gap-1 cursor-pointer whitespace-nowrap"
+                  >
+                    <Volume2 className="w-3 h-3" />
+                    <span>聽標準音</span>
+                  </button>
+                </div>
               </div>
 
-              <div className="text-[10px] space-y-0.5 bg-black/30 p-1.5 rounded font-mono">
-                <div><span className="text-slate-400">標準：</span> <span className="text-cyan-300 font-bold">{currentSentence.english}</span></div>
-                <div><span className="text-slate-400">您的：</span> <span className="text-amber-200">"{userTranscript}"</span></div>
+              <div className="text-[10px] space-y-1 bg-black/30 p-2 rounded font-mono">
+                <div className="flex flex-wrap items-center gap-1">
+                  <span className="text-slate-400 mr-0.5">逐字診斷（點擊單獨聽發音）：</span>
+                  {currentSentence.english.split(/\s+/).filter(Boolean).map((rawWord, wIdx) => {
+                    const cleanTargetW = rawWord.toLowerCase().replace(/[^a-z0-9]/g, '');
+                    const userWords = userTranscript.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
+                    const isWordHit = cleanTargetW.length > 0 && userWords.some(
+                      (u) => u === cleanTargetW || (cleanTargetW.length >= 4 && u.includes(cleanTargetW)) || (u.length >= 4 && cleanTargetW.includes(u))
+                    );
+                    return (
+                      <button
+                        key={wIdx}
+                        type="button"
+                        onClick={() => {
+                          playClickSound();
+                          speakSingleEnglishWord(rawWord, 0.78);
+                        }}
+                        className={`px-1.5 py-0.5 rounded border text-[10px] font-mono font-bold cursor-pointer transition-transform active:scale-95 ${
+                          isWordHit
+                            ? 'bg-emerald-500/20 border-emerald-400/50 text-emerald-200 hover:bg-emerald-500/30'
+                            : 'bg-rose-500/25 border-rose-400/60 text-rose-200 hover:bg-rose-500/35 underline decoration-rose-400'
+                        }`}
+                        title={isWordHit ? `發音正確：點擊重聽 ${rawWord}` : `建議加強：點擊慢速單獨聽 ${rawWord}`}
+                      >
+                        {rawWord}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div><span className="text-slate-400">您的跟讀：</span> <span className="text-amber-200">"{userTranscript}"</span></div>
               </div>
             </div>
           )}
@@ -1141,7 +1781,7 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
         <div className="md:col-span-6 space-y-1.5 flex flex-col">
           
           {/* Segmented Detail Tabs Control (3-Step Guided Flow with Completion Badges & Spring Pill) */}
-          <div className="flex items-center justify-between bg-slate-950/80 p-0.5 rounded-lg border border-slate-800/90 gap-1 overflow-x-auto no-scrollbar w-full max-w-full">
+          <div role="tablist" aria-label="句型學習模式" className="flex items-center justify-between bg-slate-950/80 p-0.5 rounded-lg border border-slate-800/90 gap-1 overflow-x-auto no-scrollbar w-full max-w-full">
             {[
               { id: 'svo', label: '1. 拆解', icon: LayoutGrid, done: false },
               { id: 'builder', label: '2. 盲測', icon: Layers, done: builderSelectedOrder.length === targetSvoTiles.length && targetSvoTiles.length > 0 },
@@ -1152,13 +1792,16 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
               return (
                 <button
                   key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={isCur}
                   onClick={() => {
                     playClickSound();
                     setActiveDetailTab(tab.id as any);
                   }}
-                  className={`relative flex-1 py-1 px-1.5 rounded-md text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1 whitespace-nowrap min-w-0 ${
+                  className={`relative flex-1 py-1 px-1.5 rounded-md text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1 whitespace-nowrap min-w-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${
                     isCur
-                      ? 'text-slate-950 shadow-md scale-[1.01]'
+                      ? 'text-slate-950 shadow-md'
                       : tab.done
                       ? 'bg-emerald-950/60 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-900/60'
                       : 'text-slate-400 hover:text-slate-100 hover:bg-slate-900/80'
@@ -1197,11 +1840,13 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
                   transition={{ duration: 0.15 }}
                   className="gap-2 h-full flex flex-col justify-between"
                 >
-                  <div className="grid grid-cols-2 gap-2 items-stretch flex-1">
+                  <div className="grid grid-cols-2 gap-2 sm:gap-2.5 items-stretch flex-1">
                     
                     {/* 主角 (S) */}
                     <motion.button
-                      whileHover={{ scale: 1.01, y: -1 }}
+                      type="button"
+                      aria-pressed={highlightSvo === 'subject'}
+                      whileHover={{ y: -2 }}
                       whileTap={{ scale: 0.98 }}
                       onMouseEnter={() => setHighlightSvo('subject')}
                       onMouseLeave={() => setHighlightSvo(null)}
@@ -1209,29 +1854,29 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
                         setHighlightSvo(highlightSvo === 'subject' ? null : 'subject');
                         speakEnglish(subjectDetails.english, currentSpeed);
                       }}
-                      className={`p-3 rounded-xl border transition-all text-center cursor-pointer flex flex-col justify-between h-full ${
+                      className={`p-2.5 sm:p-3 rounded-xl border transition-all text-center cursor-pointer flex flex-col justify-between h-full min-w-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
                         highlightSvo === 'subject'
-                          ? 'bg-cyan-900/90 border-cyan-400 shadow-xl shadow-cyan-950/50 ring-2 ring-cyan-400/60'
-                          : 'bg-gradient-to-b from-cyan-950/50 to-slate-950/90 border-cyan-500/40 hover:border-cyan-400 shadow-md'
+                          ? 'bg-cyan-950/90 border-cyan-400 shadow-lg ring-1 ring-cyan-400/60'
+                          : 'bg-gradient-to-b from-cyan-950/40 to-slate-950/95 border-cyan-500/35 hover:border-cyan-400/70'
                       }`}
                     >
-                      <div className="flex items-center justify-between w-full text-cyan-400 font-extrabold text-[10px] tracking-wider gap-1">
-                        <span className="px-2 py-0.5 rounded-md bg-cyan-950/90 border border-cyan-500/40 whitespace-nowrap">1. 主角</span>
+                      <div className="flex items-center justify-between w-full text-cyan-400 font-bold text-[10px] tracking-wider gap-1">
+                        <span className="px-1.5 sm:px-2 py-0.5 rounded-md bg-cyan-950/90 border border-cyan-500/35 whitespace-nowrap">1. 主角</span>
                         <span className="flex items-center gap-1 text-[10px] text-cyan-300/90 font-mono whitespace-nowrap">
-                          發音 <Volume2 className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                          <Volume2 className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
                         </span>
                       </div>
-                      <div className="my-auto py-1.5 space-y-0.5">
-                        <div className="text-center font-black text-slate-100 font-mono text-lg sm:text-xl break-words tracking-tight leading-snug">
+                      <div className="my-auto py-1.5 sm:py-2 space-y-0.5 w-full min-w-0">
+                        <div className="text-center font-black text-slate-100 font-mono text-base sm:text-xl break-words tracking-tight leading-snug">
                           {subjectDetails.english}
                         </div>
-                        <div className="text-center font-extrabold text-cyan-300 text-xs sm:text-sm">
+                        <div className="text-center font-bold text-cyan-300 text-xs sm:text-sm break-words">
                           {subjectDetails.chinese}
                         </div>
                       </div>
-                      <div className="w-full space-y-0.5 bg-black/45 py-1.5 px-1.5 rounded-lg border border-cyan-500/25 text-[11px]">
+                      <div className="w-full space-y-0.5 pt-1.5 sm:pt-2 border-t border-cyan-500/20 text-[10px] sm:text-[11px] min-w-0">
                         {subjectDetails.kk && (
-                          <div className="text-cyan-300 font-mono font-bold flex flex-wrap items-center justify-center gap-x-1">
+                          <div className="text-cyan-300 font-mono font-bold flex flex-wrap items-center justify-center gap-x-1 break-words">
                             <span>KK：{subjectDetails.kk}</span>
                           </div>
                         )}
@@ -1246,7 +1891,9 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
 
                     {/* 動作 */}
                     <motion.button
-                      whileHover={{ scale: 1.01, y: -1 }}
+                      type="button"
+                      aria-pressed={highlightSvo === 'action'}
+                      whileHover={{ y: -2 }}
                       whileTap={{ scale: 0.98 }}
                       onMouseEnter={() => setHighlightSvo('action')}
                       onMouseLeave={() => setHighlightSvo(null)}
@@ -1254,29 +1901,29 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
                         setHighlightSvo(highlightSvo === 'action' ? null : 'action');
                         speakEnglish(actionDetails.english, currentSpeed);
                       }}
-                      className={`p-3 rounded-xl border transition-all text-center cursor-pointer flex flex-col justify-between h-full ${
+                      className={`p-2.5 sm:p-3 rounded-xl border transition-all text-center cursor-pointer flex flex-col justify-between h-full min-w-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 ${
                         highlightSvo === 'action'
-                          ? 'bg-rose-900/90 border-rose-400 shadow-xl shadow-rose-950/50 ring-2 ring-rose-400/60'
-                          : 'bg-gradient-to-b from-rose-950/50 to-slate-950/90 border-rose-500/40 hover:border-rose-400 shadow-md'
+                          ? 'bg-rose-950/90 border-rose-400 shadow-lg ring-1 ring-rose-400/60'
+                          : 'bg-gradient-to-b from-rose-950/40 to-slate-950/95 border-rose-500/35 hover:border-rose-400/70'
                       }`}
                     >
-                      <div className="flex items-center justify-between w-full text-rose-400 font-extrabold text-[10px] tracking-wider gap-1">
-                        <span className="px-2 py-0.5 rounded-md bg-rose-950/90 border border-rose-500/40 whitespace-nowrap">2. 動作</span>
+                      <div className="flex items-center justify-between w-full text-rose-400 font-bold text-[10px] tracking-wider gap-1">
+                        <span className="px-1.5 sm:px-2 py-0.5 rounded-md bg-rose-950/90 border border-rose-500/35 whitespace-nowrap">2. 動作</span>
                         <span className="flex items-center gap-1 text-[10px] text-rose-300/90 font-mono whitespace-nowrap">
-                          發音 <Volume2 className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                          <Volume2 className="w-3.5 h-3.5 text-rose-400 shrink-0" />
                         </span>
                       </div>
-                      <div className="my-auto py-1.5 space-y-0.5">
-                        <div className="text-center font-black text-slate-100 font-mono text-lg sm:text-xl break-words tracking-tight leading-snug">
+                      <div className="my-auto py-1.5 sm:py-2 space-y-0.5 w-full min-w-0">
+                        <div className="text-center font-black text-slate-100 font-mono text-base sm:text-xl break-words tracking-tight leading-snug">
                           {actionDetails.english}
                         </div>
-                        <div className="text-center font-extrabold text-rose-300 text-xs sm:text-sm">
+                        <div className="text-center font-bold text-rose-300 text-xs sm:text-sm break-words">
                           {actionDetails.chinese}
                         </div>
                       </div>
-                      <div className="w-full space-y-0.5 bg-black/45 py-1.5 px-1.5 rounded-lg border border-rose-500/25 text-[11px]">
+                      <div className="w-full space-y-0.5 pt-1.5 sm:pt-2 border-t border-rose-500/20 text-[10px] sm:text-[11px] min-w-0">
                         {actionDetails.kk && (
-                          <div className="text-cyan-300 font-mono font-bold flex flex-wrap items-center justify-center gap-x-1">
+                          <div className="text-cyan-300 font-mono font-bold flex flex-wrap items-center justify-center gap-x-1 break-words">
                             <span>KK：{actionDetails.kk}</span>
                           </div>
                         )}
@@ -1291,7 +1938,9 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
 
                     {/* 橋樑 */}
                     <motion.button
-                      whileHover={{ scale: 1.01, y: -1 }}
+                      type="button"
+                      aria-pressed={highlightSvo === 'bridge'}
+                      whileHover={{ y: -2 }}
                       whileTap={{ scale: 0.98 }}
                       onMouseEnter={() => setHighlightSvo('bridge')}
                       onMouseLeave={() => setHighlightSvo(null)}
@@ -1299,29 +1948,29 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
                         setHighlightSvo(highlightSvo === 'bridge' ? null : 'bridge');
                         speakEnglish(bridgeDetails.english, currentSpeed);
                       }}
-                      className={`p-3 rounded-xl border transition-all text-center cursor-pointer flex flex-col justify-between h-full ${
+                      className={`p-2.5 sm:p-3 rounded-xl border transition-all text-center cursor-pointer flex flex-col justify-between h-full min-w-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 ${
                         highlightSvo === 'bridge'
-                          ? 'bg-indigo-900/90 border-indigo-400 shadow-xl shadow-indigo-950/50 ring-2 ring-indigo-400/60'
-                          : 'bg-gradient-to-b from-indigo-950/50 to-slate-950/90 border-indigo-500/40 hover:border-indigo-400 shadow-md'
+                          ? 'bg-indigo-950/90 border-indigo-400 shadow-lg ring-1 ring-indigo-400/60'
+                          : 'bg-gradient-to-b from-indigo-950/40 to-slate-950/95 border-indigo-500/35 hover:border-indigo-400/70'
                       }`}
                     >
-                      <div className="flex items-center justify-between w-full text-indigo-400 font-extrabold text-[10px] tracking-wider gap-1">
-                        <span className="px-2 py-0.5 rounded-md bg-indigo-950/90 border border-indigo-500/40 whitespace-nowrap">3. 橋樑</span>
+                      <div className="flex items-center justify-between w-full text-indigo-400 font-bold text-[10px] tracking-wider gap-1">
+                        <span className="px-1.5 sm:px-2 py-0.5 rounded-md bg-indigo-950/90 border border-indigo-500/35 whitespace-nowrap">3. 橋樑</span>
                         <span className="flex items-center gap-1 text-[10px] text-indigo-300/90 font-mono whitespace-nowrap">
-                          發音 <Volume2 className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                          <Volume2 className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
                         </span>
                       </div>
-                      <div className="my-auto py-1.5 space-y-0.5">
-                        <div className="text-center font-black text-slate-100 font-mono text-lg sm:text-xl break-words tracking-tight leading-snug">
+                      <div className="my-auto py-1.5 sm:py-2 space-y-0.5 w-full min-w-0">
+                        <div className="text-center font-black text-slate-100 font-mono text-base sm:text-xl break-words tracking-tight leading-snug">
                           {bridgeDetails.english}
                         </div>
-                        <div className="text-center font-extrabold text-indigo-300 text-xs sm:text-sm">
+                        <div className="text-center font-bold text-indigo-300 text-xs sm:text-sm break-words">
                           {bridgeDetails.chinese}
                         </div>
                       </div>
-                      <div className="w-full space-y-0.5 bg-black/45 py-1.5 px-1.5 rounded-lg border border-indigo-500/25 text-[11px]">
+                      <div className="w-full space-y-0.5 pt-1.5 sm:pt-2 border-t border-indigo-500/20 text-[10px] sm:text-[11px] min-w-0">
                         {bridgeDetails.kk && (
-                          <div className="text-cyan-300 font-mono font-bold flex flex-wrap items-center justify-center gap-x-1">
+                          <div className="text-cyan-300 font-mono font-bold flex flex-wrap items-center justify-center gap-x-1 break-words">
                             <span>KK：{bridgeDetails.kk}</span>
                           </div>
                         )}
@@ -1336,7 +1985,9 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
 
                     {/* 東西 */}
                     <motion.button
-                      whileHover={{ scale: 1.01, y: -1 }}
+                      type="button"
+                      aria-pressed={highlightSvo === 'object'}
+                      whileHover={{ y: -2 }}
                       whileTap={{ scale: 0.98 }}
                       onMouseEnter={() => setHighlightSvo('object')}
                       onMouseLeave={() => setHighlightSvo(null)}
@@ -1344,29 +1995,29 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
                         setHighlightSvo(highlightSvo === 'object' ? null : 'object');
                         speakEnglish(objectDetails.english, currentSpeed);
                       }}
-                      className={`p-3 rounded-xl border transition-all text-center cursor-pointer flex flex-col justify-between h-full ${
+                      className={`p-2.5 sm:p-3 rounded-xl border transition-all text-center cursor-pointer flex flex-col justify-between h-full min-w-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 ${
                         highlightSvo === 'object'
-                          ? 'bg-emerald-900/90 border-emerald-400 shadow-xl shadow-emerald-950/50 ring-2 ring-emerald-400/60'
-                          : 'bg-gradient-to-b from-emerald-950/50 to-slate-950/90 border-emerald-500/40 hover:border-emerald-400 shadow-md'
+                          ? 'bg-emerald-950/90 border-emerald-400 shadow-lg ring-1 ring-emerald-400/60'
+                          : 'bg-gradient-to-b from-emerald-950/40 to-slate-950/95 border-emerald-500/35 hover:border-emerald-400/70'
                       }`}
                     >
-                      <div className="flex items-center justify-between w-full text-emerald-400 font-extrabold text-[10px] tracking-wider gap-1">
-                        <span className="px-2 py-0.5 rounded-md bg-emerald-950/90 border border-emerald-500/40 whitespace-nowrap">4. 東西</span>
+                      <div className="flex items-center justify-between w-full text-emerald-400 font-bold text-[10px] tracking-wider gap-1">
+                        <span className="px-1.5 sm:px-2 py-0.5 rounded-md bg-emerald-950/90 border border-emerald-500/35 whitespace-nowrap">4. 東西</span>
                         <span className="flex items-center gap-1 text-[10px] text-emerald-300/90 font-mono whitespace-nowrap">
-                          發音 <Volume2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                          <Volume2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                         </span>
                       </div>
-                      <div className="my-auto py-1.5 space-y-0.5">
-                        <div className="text-center font-black text-slate-100 font-mono text-lg sm:text-xl break-words tracking-tight leading-snug">
+                      <div className="my-auto py-1.5 sm:py-2 space-y-0.5 w-full min-w-0">
+                        <div className="text-center font-black text-slate-100 font-mono text-base sm:text-xl break-words tracking-tight leading-snug">
                           {objectDetails.english}
                         </div>
-                        <div className="text-center font-extrabold text-emerald-300 text-xs sm:text-sm">
+                        <div className="text-center font-bold text-emerald-300 text-xs sm:text-sm break-words">
                           {objectDetails.chinese}
                         </div>
                       </div>
-                      <div className="w-full space-y-0.5 bg-black/45 py-1.5 px-1.5 rounded-lg border border-emerald-500/25 text-[11px]">
+                      <div className="w-full space-y-0.5 pt-1.5 sm:pt-2 border-t border-emerald-500/20 text-[10px] sm:text-[11px] min-w-0">
                         {objectDetails.kk && (
-                          <div className="text-cyan-300 font-mono font-bold flex flex-wrap items-center justify-center gap-x-1">
+                          <div className="text-cyan-300 font-mono font-bold flex flex-wrap items-center justify-center gap-x-1 break-words">
                             <span>KK：{objectDetails.kk}</span>
                           </div>
                         )}
@@ -1382,34 +2033,89 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
                   </div>
 
                   {/* 一口氣語序連讀與盲測啟動列 (精簡單排設計，不重複堆疊卡片) */}
-                  <div className="bg-slate-950/95 border border-slate-800/90 rounded-xl px-3 py-2 flex items-center justify-between gap-2 flex-wrap shadow-inner">
-                    <div className="flex items-center gap-2 min-w-0 flex-1 text-xs font-mono">
+                  <div className="bg-slate-950/95 border border-slate-800/90 rounded-xl px-2.5 sm:px-3 py-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-inner">
+                    <div className="flex items-start sm:items-center gap-1.5 min-w-0 flex-1 text-xs font-mono">
                       <span className="text-emerald-400 font-black shrink-0">連讀口訣 ·</span>
-                      <span className="text-emerald-200 font-bold truncate">
+                      <span className="text-emerald-200 font-bold break-words leading-snug">
                         {subjectDetails.homophone} ➔ {actionDetails.homophone} ➔ {bridgeDetails.homophone} ➔ {objectDetails.homophone}
                       </span>
                     </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
+                    <div className="grid grid-cols-2 sm:flex items-center gap-1.5 w-full sm:w-auto shrink-0">
                       <button
                         type="button"
                         onClick={() => {
-                          playClickSound();
-                          setHighlightSvo('subject');
-                          speakEnglish(subjectDetails.english, 0.76, () => {
-                            setHighlightSvo('action');
-                            speakEnglish(actionDetails.english, 0.76, () => {
-                              setHighlightSvo('bridge');
-                              speakEnglish(bridgeDetails.english, 0.76, () => {
-                                setHighlightSvo('object');
-                                speakEnglish(objectDetails.english, 0.76, () => {
-                                  setHighlightSvo(null);
-                                  speakEnglish(currentSentence.english, 0.85);
-                                });
-                              });
-                            });
-                          });
+                          isStartingSpeechRef.current = true;
+                          try {
+                            cancelActiveDrills();
+                            cancelSpeech();
+                            playClickSound();
+                            const mySession = ++drillSessionRef.current;
+                            setIsPlaying(true);
+                            setHighlightSvo('subject');
+                            globalAudioScheduler.scheduleSequence(
+                              [
+                                {
+                                  text: subjectDetails.english,
+                                  lang: 'en-US',
+                                  rate: 0.76,
+                                  bufferAfterMs: 220,
+                                  onStepStart: () => {
+                                    if (drillSessionRef.current === mySession) setHighlightSvo('subject');
+                                  }
+                                },
+                                {
+                                  text: actionDetails.english,
+                                  lang: 'en-US',
+                                  rate: 0.76,
+                                  bufferAfterMs: 220,
+                                  onStepStart: () => {
+                                    if (drillSessionRef.current === mySession) setHighlightSvo('action');
+                                  }
+                                },
+                                {
+                                  text: bridgeDetails.english,
+                                  lang: 'en-US',
+                                  rate: 0.76,
+                                  bufferAfterMs: 220,
+                                  onStepStart: () => {
+                                    if (drillSessionRef.current === mySession) setHighlightSvo('bridge');
+                                  }
+                                },
+                                {
+                                  text: objectDetails.english,
+                                  lang: 'en-US',
+                                  rate: 0.76,
+                                  bufferAfterMs: 260,
+                                  onStepStart: () => {
+                                    if (drillSessionRef.current === mySession) setHighlightSvo('object');
+                                  }
+                                },
+                                {
+                                  text: currentSentence.english,
+                                  lang: 'en-US',
+                                  rate: 0.85,
+                                  bufferAfterMs: 150,
+                                  onStepStart: () => {
+                                    if (drillSessionRef.current === mySession) setHighlightSvo(null);
+                                  }
+                                }
+                              ],
+                              {
+                                interrupt: false,
+                                isCancelled: () => drillSessionRef.current !== mySession,
+                                onSequenceEnd: () => {
+                                  if (drillSessionRef.current === mySession) {
+                                    setHighlightSvo(null);
+                                    setIsPlaying(false);
+                                  }
+                                }
+                              }
+                            );
+                          } finally {
+                            isStartingSpeechRef.current = false;
+                          }
                         }}
-                        className="px-2.5 py-1 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 border border-cyan-500/40 text-[11px] font-mono font-bold cursor-pointer transition-all shrink-0 whitespace-nowrap flex items-center gap-1"
+                        className="min-h-[32px] px-2.5 py-1 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 border border-cyan-500/40 text-[11px] font-mono font-bold cursor-pointer transition-all shrink-0 whitespace-nowrap flex items-center justify-center gap-1"
                         title="自動依序高亮並朗讀：主角 ➔ 動作 ➔ 橋樑 ➔ 東西 ➔ 整句連讀"
                       >
                         <Play className="w-3 h-3 fill-current" />
@@ -1421,7 +2127,7 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
                           playClickSound();
                           setActiveDetailTab('builder');
                         }}
-                        className="px-2.5 py-1 rounded-lg bg-amber-400/15 hover:bg-amber-400/25 text-amber-300 border border-amber-400/30 text-[11px] font-mono font-bold cursor-pointer transition-all shrink-0 whitespace-nowrap"
+                        className="min-h-[32px] px-2.5 py-1 rounded-lg bg-amber-400/15 hover:bg-amber-400/25 text-amber-300 border border-amber-400/30 text-[11px] font-mono font-bold cursor-pointer transition-all shrink-0 whitespace-nowrap flex items-center justify-center"
                       >
                         盲測 →
                       </button>
@@ -1494,11 +2200,11 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
                         return (
                           <div
                             key={slotTile.id}
-                            className={`p-2 rounded-lg border-2 text-xs font-mono flex flex-col justify-between min-h-[60px] transition-all ${
+                            className={`p-2 rounded-lg border text-xs font-mono flex flex-col justify-between min-h-[60px] transition-all ${
                               filledTile
                                 ? `${filledTile.color} shadow-sm`
                                 : isNextSlot
-                                ? 'bg-slate-900/90 border-dashed border-amber-400/70 text-amber-300 animate-pulse'
+                                ? 'bg-amber-500/10 border-dashed border-amber-400/80 text-amber-300'
                                 : 'bg-slate-900/50 border-dashed border-slate-800 text-slate-500'
                             }`}
                           >
@@ -1528,6 +2234,14 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
                           <span>SVO 語序拼裝成功！</span>
                         </div>
                         <div className="flex items-center gap-1.5 ml-auto">
+                          <button
+                            type="button"
+                            onClick={() => handleListenSpeech(0.7)}
+                            className="px-2 py-1 rounded-lg bg-amber-500/20 text-amber-200 border border-amber-400/40 text-[11px] font-mono font-black cursor-pointer hover:bg-amber-500/30 whitespace-nowrap tabular-nums"
+                            title="以 0.7x 慢速複習整句"
+                          >
+                            0.7x
+                          </button>
                           <button
                             type="button"
                             onClick={() => handleListenSpeech()}
@@ -1563,11 +2277,11 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
                       return (
                         <motion.button
                           key={tile.id}
-                          whileHover={{ scale: isSelected ? 1 : 1.01 }}
+                          type="button"
                           whileTap={{ scale: isSelected ? 1 : 0.98 }}
                           disabled={isSelected}
                           onClick={() => handleTileClick(tile.id)}
-                          className={`p-3 rounded-xl border-2 text-left transition-all cursor-pointer flex flex-col justify-between h-full ${
+                          className={`p-3 rounded-xl border-2 text-left transition-all cursor-pointer flex flex-col justify-between h-full focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${
                             isSelected
                               ? 'opacity-30 grayscale cursor-not-allowed bg-slate-950 border-slate-800'
                               : isError
@@ -1614,11 +2328,11 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
                     {/* 3-Day Auto-Update Notice Banner */}
                     <div className="bg-gradient-to-r from-amber-950/50 via-slate-900 to-amber-950/40 border border-amber-500/40 rounded-xl px-3 py-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs shadow-sm">
                       <div className="flex items-center gap-2 flex-wrap min-w-0">
-                        <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping shrink-0" />
-                        <span className="font-black text-amber-300 text-xs sm:text-sm">
+                        <Zap className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                        <span className="font-black text-amber-300 text-xs sm:text-sm tabular-nums">
                           第 {cycleNumber} 輪題庫
                         </span>
-                        <span className="px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-300 font-mono text-[10px] font-extrabold border border-amber-500/40">
+                        <span className="px-2 py-0.5 rounded-md bg-amber-400/15 text-amber-300 font-mono text-[10px] font-bold border border-amber-500/35 tabular-nums">
                           {daysLeft}天 {hoursLeft}時 更新
                         </span>
                       </div>
@@ -1641,7 +2355,7 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
                       </div>
                       {Object.keys(selectedAnswers).length === 2 && (
                         <div className="flex items-center gap-1.5">
-                          <span className="px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-700 text-xs font-black flex items-center gap-1">
+                          <span className="px-2 py-0.5 rounded-lg bg-emerald-950 text-emerald-300 border border-emerald-700 text-xs font-black flex items-center gap-1">
                             <Award className="w-3.5 h-3.5 text-emerald-400" />
                             <span>本輪已完成</span>
                           </span>
@@ -1653,7 +2367,7 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
                                 onNextLesson();
                                 setActiveDetailTab('svo');
                               }}
-                              className="px-2.5 py-0.5 rounded-full bg-cyan-400 hover:bg-cyan-300 text-slate-950 text-xs font-black flex items-center gap-1 cursor-pointer shadow-xs"
+                              className="px-2.5 py-0.5 rounded-lg bg-cyan-400 hover:bg-cyan-300 text-slate-950 text-xs font-black flex items-center gap-1 cursor-pointer shadow-xs"
                             >
                               <span>前往下一關 →</span>
                             </button>
@@ -1711,10 +2425,19 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
                                 return (
                                   <div
                                     key={optIdx}
+                                    role="button"
+                                    tabIndex={hasAnswered ? -1 : 0}
+                                    aria-disabled={hasAnswered}
                                     onClick={() => {
                                       if (!hasAnswered) handleSelectAnswer(qIdx, optIdx);
                                     }}
-                                    className={`px-2.5 py-2 rounded-xl border text-xs sm:text-[13px] text-left transition-all cursor-pointer flex items-center justify-between gap-2 min-h-[40px] ${btnStyle}`}
+                                    onKeyDown={(e) => {
+                                      if (!hasAnswered && (e.key === 'Enter' || e.key === ' ')) {
+                                        e.preventDefault();
+                                        handleSelectAnswer(qIdx, optIdx);
+                                      }
+                                    }}
+                                    className={`px-2.5 py-2 rounded-xl border text-xs sm:text-[13px] text-left transition-all flex items-center justify-between gap-2 min-h-[40px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${hasAnswered ? 'cursor-default' : 'cursor-pointer'} ${btnStyle}`}
                                   >
                                     <div className="flex items-start gap-2 flex-1 min-w-0">
                                       <span className="w-5 h-5 rounded-md bg-slate-800/90 border border-slate-700/80 flex items-center justify-center text-[10px] font-mono font-black text-amber-300 shrink-0 mt-0.5">
@@ -1864,10 +2587,10 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
                         : 'bg-slate-900/90 hover:bg-slate-800 border-slate-800 text-slate-300'
                     }`}
                   >
-                    <div className="flex items-center justify-between gap-1 text-[10px] font-mono font-bold">
+                    <div className="flex items-center justify-between gap-1 text-[10px] font-mono font-bold tabular-nums">
                       <span>關卡 {idx + 1}</span>
                       {isDone && !isCur && <span className="text-emerald-400">✓ 已讀</span>}
-                      {isCur && <span>● 當前</span>}
+                      {isCur && <span>當前</span>}
                     </div>
                     <div className="text-[11px] font-bold break-words leading-tight">
                       {cleanTitle}
@@ -1883,74 +2606,213 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
         )}
       </AnimatePresence>
 
-      {/* Level Navigation Footer (下面完全貼緊框架底部，無下邊空隙) */}
-      {(onNextLesson || onPrevLesson) && (
-        <div className="-mx-2.5 sm:-mx-3 mt-auto px-3 py-1.2 sm:px-3.5 sm:py-1.5 bg-slate-950/95 border-t border-slate-800/90 rounded-b-2xl flex items-center justify-between gap-2 shadow-inner">
-          <div className="flex items-center gap-2">
-            {onPrevLesson && (
-              <button
-                onClick={() => {
-                  playClickSound();
-                  onPrevLesson();
-                }}
-                className="flex items-center gap-1.5 px-2.5 py-1.2 rounded-lg bg-slate-900/90 hover:bg-slate-800 border border-slate-700/80 text-slate-300 hover:text-white font-bold text-xs transition-all cursor-pointer shadow-xs active:scale-95 whitespace-nowrap"
-                title="上一關 (←)"
-              >
-                <ArrowLeft className="w-3.5 h-3.5" />
-                <span>上一關</span>
-              </button>
-            )}
-          </div>
-
-          {/* Integrated Compact Shortcuts Hint (Center Aligned) */}
-          <div className="hidden md:flex items-center gap-2 text-[10px] font-mono text-slate-400 bg-slate-900/60 px-2.5 py-1 rounded-lg border border-slate-800/60">
-            <span className="flex items-center gap-1 text-cyan-400 font-bold">
-              <Keyboard className="w-3 h-3" />
-              <span>快捷鍵:</span>
+      {/* SM-2 Memory Curve Self-Rating Strip */}
+      {onRateMemory && (
+        <div className="px-3.5 py-2 sm:px-4 bg-slate-950/80 border-t border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-[11px] font-mono text-slate-300 tabular-nums">
+            <span className="font-bold text-amber-300">記憶曲線評估</span>
+            <span className="text-slate-600">·</span>
+            <span className={srsState && srsState.nextReviewAt <= Date.now() ? 'text-amber-300 font-bold' : 'text-cyan-300'}>
+              {srsState ? formatNextReviewLabel(srsState) : '尚未評級（新句型）'}
             </span>
-            <span><kbd className="px-1 py-0.2 bg-slate-800 text-amber-300 rounded text-[9px] font-bold">Space</kbd> 朗讀</span>
-            <span className="text-slate-700">·</span>
-            <span><kbd className="px-1 py-0.2 bg-slate-800 text-indigo-300 rounded text-[9px] font-bold">S</kbd> SVO</span>
-            <span className="text-slate-700">·</span>
-            <span><kbd className="px-1 py-0.2 bg-slate-800 text-emerald-300 rounded text-[9px] font-bold">Q</kbd> 測驗</span>
-            {onNextLesson && (
-              <>
-                <span className="text-slate-700">·</span>
-                <span><kbd className="px-1 py-0.2 bg-slate-800 text-cyan-300 rounded text-[9px] font-bold">N / →</kbd> 下一關</span>
-              </>
-            )}
           </div>
 
-          <div className="flex items-center gap-2">
-            {typeof currentIndex === 'number' && typeof totalLessons === 'number' && (
-              <button
-                type="button"
-                onClick={() => {
+          <div className="grid grid-cols-3 gap-1 sm:gap-1.5 sm:flex sm:items-center w-full sm:w-auto">
+            <button
+              type="button"
+              onClick={() => {
+                playClickSound();
+                onRateMemory(lesson.id, 'hard');
+              }}
+              className={`min-h-[34px] px-1.5 sm:px-2.5 py-1 rounded-lg border text-[11px] font-bold cursor-pointer transition-all active:scale-95 text-center leading-tight ${
+                srsState?.lastRating === 'hard'
+                  ? 'bg-rose-500/25 border-rose-400 text-rose-200 font-black'
+                  : 'bg-slate-900 hover:bg-rose-950/60 border-slate-700/80 hover:border-rose-500/50 text-rose-300'
+              }`}
+              title="標記生疏：立即排入待複習清單"
+            >
+              生疏 · 複習
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                playClickSound();
+                onRateMemory(lesson.id, 'good');
+              }}
+              className={`min-h-[34px] px-1.5 sm:px-2.5 py-1 rounded-lg border text-[11px] font-bold cursor-pointer transition-all active:scale-95 text-center leading-tight tabular-nums ${
+                srsState?.lastRating === 'good'
+                  ? 'bg-cyan-500/25 border-cyan-400 text-cyan-200 font-black'
+                  : 'bg-slate-900 hover:bg-cyan-950/60 border-slate-700/80 hover:border-cyan-500/50 text-cyan-300'
+              }`}
+              title="標記尚可：依 SM-2 曲線排程下次複習"
+            >
+              尚可 · 1天後
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                playSuccessChime();
+                onRateMemory(lesson.id, 'easy');
+              }}
+              className={`min-h-[34px] px-1.5 sm:px-2.5 py-1 rounded-lg border text-[11px] font-bold cursor-pointer transition-all active:scale-95 text-center leading-tight tabular-nums ${
+                srsState?.lastRating === 'easy'
+                  ? 'bg-emerald-500/25 border-emerald-400 text-emerald-200 font-black'
+                  : 'bg-slate-900 hover:bg-emerald-950/60 border-slate-700/80 hover:border-emerald-500/50 text-emerald-300'
+              }`}
+              title="標記秒懂：大幅拉長複習週期"
+            >
+              秒懂 · 4天後
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Level Navigation Footer: Mobile Cleanroom Glove Swipe Trackpad + Desktop Controls */}
+      {(onNextLesson || onPrevLesson) && (
+        <div className="mt-auto px-3 py-2.5 sm:px-4 bg-slate-950/95 border-t border-slate-800/90">
+          {/* 行動版無塵室手套友善滑動觸控軌 (取代傳統左右箭頭按鈕) */}
+          <div
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+            onTouchCancel={resetSwipeState}
+            role="region"
+            aria-label="無塵室手套滑動換關觸控區：向右滑動上一關，向左滑動下一關"
+            className={`md:hidden relative w-full min-h-[46px] rounded-xl border px-3 py-1.5 flex items-center justify-between select-none touch-pan-y overflow-hidden transition-colors ${
+              swipeActionReady === 'next'
+                ? 'bg-cyan-950/90 border-cyan-400 shadow-inner'
+                : swipeActionReady === 'prev'
+                ? 'bg-amber-950/90 border-amber-400 shadow-inner'
+                : 'bg-slate-900/95 border-slate-700/90'
+            }`}
+          >
+            {/* Left Swipe Runway Hint (向右滑：上一關) */}
+            <div
+              className={`flex items-center gap-1 text-[10px] sm:text-[11px] font-mono whitespace-nowrap transition-all pointer-events-none ${
+                swipeOffsetX > 8 || swipeActionReady === 'prev'
+                  ? 'text-amber-300 font-black scale-105'
+                  : 'text-slate-400 font-bold'
+              }`}
+            >
+              <span className="text-amber-400 font-black tracking-tighter">⟪</span>
+              <span>{swipeActionReady === 'prev' ? '放開上一關' : '右滑上一關'}</span>
+            </div>
+
+            {/* Center Interactive Sliding Pill (跟隨手指位移 + 點擊展開選關) */}
+            <button
+              type="button"
+              onClick={() => {
+                if (Math.abs(swipeOffsetX) < 6 && typeof currentIndex === 'number' && typeof totalLessons === 'number') {
                   playClickSound();
                   setIsLevelPickerOpen((prev) => !prev);
-                }}
-                className="text-xs text-slate-200 hover:text-white font-mono font-bold bg-slate-900 hover:bg-slate-800 px-2.5 py-1 rounded-lg border border-slate-700 hover:border-cyan-500/50 cursor-pointer transition-all whitespace-nowrap flex items-center gap-1"
-                title="點擊展開全關卡快速跳轉選單"
-              >
-                <span>關卡 <strong className="text-cyan-300 font-black">{currentIndex + 1}</strong> / {totalLessons}</span>
-                <span className="text-[10px] text-amber-400">{isLevelPickerOpen ? '▴' : '▾'}</span>
-              </button>
-            )}
-            {onNextLesson && (
-              <motion.button
-                whileHover={{ scale: 1.03 }}
-                whileTap={{ scale: 0.97 }}
-                onClick={() => {
-                  playClickSound();
-                  onNextLesson();
-                }}
-                className="flex items-center gap-1.5 px-3.5 sm:px-4 py-1.5 rounded-xl bg-gradient-to-r from-cyan-500 via-teal-500 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-slate-950 font-black text-xs sm:text-sm shadow-md shadow-cyan-500/25 transition-all cursor-pointer ring-1 ring-cyan-300/80 whitespace-nowrap"
-                title="前往下一關 (→ 或 N)"
-              >
-                <span>下一關</span>
-                <ArrowRight className="w-4 h-4 stroke-[2.5]" />
-              </motion.button>
-            )}
+                }
+              }}
+              style={{
+                transform: `translate3d(${swipeOffsetX * 0.65}px, 0, 0)`,
+                transition: swipeOffsetX === 0 ? 'transform 180ms cubic-bezier(0.22, 1, 0.36, 1)' : 'none',
+              }}
+              className={`z-10 min-h-[32px] px-2.5 py-1 rounded-lg border text-[11px] sm:text-xs font-mono font-black tabular-nums flex items-center gap-1 shadow-md cursor-pointer active:scale-95 whitespace-nowrap ${
+                swipeActionReady === 'next'
+                  ? 'bg-cyan-400 text-slate-950 border-cyan-200'
+                  : swipeActionReady === 'prev'
+                  ? 'bg-amber-400 text-slate-950 border-amber-200'
+                  : 'bg-slate-950 text-cyan-300 border-cyan-500/45'
+              }`}
+              title="左右滑動切換關卡，或點此展開關卡總覽"
+            >
+              {typeof currentIndex === 'number' && typeof totalLessons === 'number' ? (
+                <>
+                  <span>
+                    關卡 <strong className={swipeActionReady ? 'text-slate-950' : 'text-amber-300'}>{currentIndex + 1}</strong>/{totalLessons}
+                  </span>
+                  <span className="text-[10px] opacity-80">{isLevelPickerOpen ? '▴' : '▾'}</span>
+                </>
+              ) : (
+                <span>手套滑動換關</span>
+              )}
+            </button>
+
+            {/* Right Swipe Runway Hint (向左滑：下一關) */}
+            <div
+              className={`flex items-center gap-1 text-[10px] sm:text-[11px] font-mono whitespace-nowrap transition-all pointer-events-none ${
+                swipeOffsetX < -8 || swipeActionReady === 'next'
+                  ? 'text-cyan-300 font-black scale-105'
+                  : 'text-slate-400 font-bold'
+              }`}
+            >
+              <span>{swipeActionReady === 'next' ? '放開下一關' : '左滑下一關'}</span>
+              <span className="text-cyan-400 font-black tracking-tighter">⟫</span>
+            </div>
+          </div>
+
+          {/* 桌面版導覽列與鍵盤快捷鍵提示 */}
+          <div className="hidden md:flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              {onPrevLesson && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    playClickSound();
+                    onPrevLesson();
+                  }}
+                  className="min-h-[38px] flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-slate-700/80 text-slate-300 hover:text-white font-bold text-xs transition-colors cursor-pointer active:scale-95 whitespace-nowrap"
+                  title="上一關 (←)"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5 shrink-0" />
+                  <span>上一關</span>
+                </button>
+              )}
+            </div>
+
+            {/* Integrated Compact Shortcuts Hint (Center Aligned) */}
+            <div className="flex items-center gap-2 text-[10px] font-mono text-slate-400 bg-slate-900/60 px-3 py-1.5 rounded-xl border border-slate-800/60">
+              <span className="flex items-center gap-1 text-cyan-400 font-bold">
+                <Keyboard className="w-3 h-3" />
+                <span>快捷鍵:</span>
+              </span>
+              <span><kbd className="px-1.5 py-0.5 bg-slate-800 text-amber-300 rounded text-[9px] font-bold">Space</kbd> 朗讀</span>
+              <span className="text-slate-700">·</span>
+              <span><kbd className="px-1.5 py-0.5 bg-slate-800 text-indigo-300 rounded text-[9px] font-bold">S</kbd> SVO</span>
+              <span className="text-slate-700">·</span>
+              <span><kbd className="px-1.5 py-0.5 bg-slate-800 text-emerald-300 rounded text-[9px] font-bold">Q</kbd> 測驗</span>
+              {onNextLesson && (
+                <>
+                  <span className="text-slate-700">·</span>
+                  <span><kbd className="px-1.5 py-0.5 bg-slate-800 text-cyan-300 rounded text-[9px] font-bold">N / →</kbd> 下一關</span>
+                </>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              {typeof currentIndex === 'number' && typeof totalLessons === 'number' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    playClickSound();
+                    setIsLevelPickerOpen((prev) => !prev);
+                  }}
+                  className="min-h-[38px] text-xs text-slate-200 hover:text-white font-mono font-bold bg-slate-900 hover:bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-700 hover:border-cyan-500/50 cursor-pointer transition-colors whitespace-nowrap flex items-center gap-1 tabular-nums"
+                  title="點擊展開全關卡快速跳轉選單"
+                >
+                  <span>關卡 <strong className="text-cyan-300 font-black">{currentIndex + 1}</strong> / {totalLessons}</span>
+                  <span className="text-[10px] text-amber-400">{isLevelPickerOpen ? '▴' : '▾'}</span>
+                </button>
+              )}
+              {onNextLesson && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    playClickSound();
+                    onNextLesson();
+                  }}
+                  className="min-h-[38px] flex items-center gap-1.5 px-4 py-1.5 rounded-xl bg-gradient-to-r from-cyan-400 to-teal-400 hover:brightness-110 active:scale-[0.98] text-slate-950 font-black text-xs sm:text-sm shadow-md shadow-cyan-500/20 transition-all cursor-pointer whitespace-nowrap"
+                  title="前往下一關 (→ 或 N)"
+                >
+                  <span>下一關</span>
+                  <ArrowRight className="w-4 h-4 stroke-[2.4] shrink-0" />
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -1958,8 +2820,15 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
       {/* Lesson Personal Note Modal */}
       <AnimatePresence>
         {isNoteModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-sm">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="關卡個人筆記與實務備忘"
+            onClick={() => setIsNoteModalOpen(false)}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-sm"
+          >
             <motion.div
+              onClick={(e) => e.stopPropagation()}
               initial={{ scale: 0.92, opacity: 0, y: 15 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.92, opacity: 0, y: 15 }}
@@ -1980,8 +2849,10 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
                   </div>
                 </div>
                 <button
+                  type="button"
+                  aria-label="關閉筆記視窗"
                   onClick={() => setIsNoteModalOpen(false)}
-                  className="p-1.5 rounded-xl bg-slate-800 text-slate-400 hover:text-white cursor-pointer"
+                  className="p-1.5 rounded-xl bg-slate-800 text-slate-400 hover:text-white cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -1994,7 +2865,13 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
                 <textarea
                   value={tempNoteText}
                   onChange={(e) => setTempNoteText(e.target.value)}
-                  placeholder="例：交接時記得提醒下一班確認 RF match box 溫度；或諧音口訣記法..."
+                  onKeyDown={(e) => {
+                    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                      e.preventDefault();
+                      handleSaveLessonNote();
+                    }
+                  }}
+                  placeholder="例：交接時記得提醒下一班確認 RF match box 溫度；或諧音口訣記法...（Ctrl+Enter 快速儲存）"
                   rows={4}
                   className="w-full p-3 bg-slate-950 border border-slate-700 rounded-xl text-slate-200 text-xs focus:outline-none focus:border-amber-400 leading-relaxed resize-none font-sans"
                   autoFocus
@@ -2005,8 +2882,9 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
                 <div>
                   {currentLessonNote && (
                     <button
+                      type="button"
                       onClick={handleClearLessonNote}
-                      className="px-3 py-2 rounded-xl bg-rose-950/80 border border-rose-800/80 text-rose-300 hover:bg-rose-900 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                      className="px-3 py-2 rounded-xl bg-rose-950/80 border border-rose-800/80 text-rose-300 hover:bg-rose-900 text-xs font-bold flex items-center gap-1.5 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                       <span>清除筆記</span>
@@ -2016,14 +2894,16 @@ const LessonCardComponent: React.FC<LessonCardProps> = ({
 
                 <div className="flex items-center gap-2">
                   <button
+                    type="button"
                     onClick={() => setIsNoteModalOpen(false)}
-                    className="px-3.5 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-bold hover:bg-slate-700 cursor-pointer"
+                    className="px-3.5 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-bold hover:bg-slate-700 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
                   >
                     取消
                   </button>
                   <button
+                    type="button"
                     onClick={handleSaveLessonNote}
-                    className="px-5 py-2 rounded-xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-lg shadow-amber-400/20 cursor-pointer"
+                    className="px-5 py-2 rounded-xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-lg shadow-amber-400/20 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
                   >
                     <Save className="w-3.5 h-3.5" />
                     <span>儲存筆記</span>
