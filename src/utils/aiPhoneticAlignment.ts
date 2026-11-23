@@ -419,3 +419,89 @@ export function clearWeaknessVocabList(): void {
     } catch {}
   }
 }
+
+export function sanitizeWeaknessVocabEntry(raw: unknown): WeaknessVocabEntry | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const item = raw as Record<string, unknown>;
+  const key = normalizeWord(String(item.word || item.displayWord || ''));
+  if (!key || key.length > 64) return null;
+  const displayWord = String(item.displayWord || key).trim().slice(0, 64) || key;
+  const kkPhonetic = String(item.kkPhonetic || getWordKKPhonetic(displayWord)).trim().slice(0, 64);
+  const chineseMeaning = String(item.chineseMeaning || '晶圓廠工程詞彙').trim().slice(0, 120);
+  const rawScore = Number(item.lastAlignmentScore);
+  const lastAlignmentScore = Number.isFinite(rawScore) ? Math.min(100, Math.max(0, Math.round(rawScore))) : 60;
+  const rawMiss = Number(item.missCount);
+  const missCount = Number.isFinite(rawMiss) ? Math.min(999, Math.max(1, Math.round(rawMiss))) : 1;
+  const lastSentence = String(item.lastSentence || displayWord).trim().slice(0, 240);
+  const kkIssueNote = String(item.kkIssueNote || `音節對齊偏弱 (${kkPhonetic})`).trim().slice(0, 200);
+  const rawTs = Number(item.updatedAt);
+  const updatedAt = Number.isFinite(rawTs) && rawTs > 0 ? Math.round(rawTs) : Date.now();
+  return {
+    word: key,
+    displayWord,
+    kkPhonetic,
+    chineseMeaning,
+    lastAlignmentScore,
+    missCount,
+    lastSentence,
+    kkIssueNote,
+    updatedAt,
+  };
+}
+
+/**
+ * 跨裝置無衝突合併 Weakness-Vocab-List（保留較高失準次數與最新對齊紀錄，上限 80 筆）
+ */
+export function mergeWeaknessVocabLists(
+  localList: unknown,
+  remoteList: unknown
+): WeaknessVocabEntry[] {
+  const map = new Map<string, WeaknessVocabEntry>();
+  const ingest = (list: unknown) => {
+    if (!Array.isArray(list)) return;
+    for (const raw of list.slice(0, 120)) {
+      const clean = sanitizeWeaknessVocabEntry(raw);
+      if (!clean) continue;
+      const prev = map.get(clean.word);
+      if (!prev) {
+        map.set(clean.word, clean);
+      } else {
+        const useCleanLatest = clean.updatedAt >= prev.updatedAt;
+        map.set(clean.word, {
+          word: clean.word,
+          displayWord: useCleanLatest ? clean.displayWord : prev.displayWord,
+          kkPhonetic: (useCleanLatest ? clean.kkPhonetic : prev.kkPhonetic) || clean.kkPhonetic,
+          chineseMeaning: (useCleanLatest ? clean.chineseMeaning : prev.chineseMeaning) || clean.chineseMeaning,
+          lastAlignmentScore: useCleanLatest ? clean.lastAlignmentScore : prev.lastAlignmentScore,
+          missCount: Math.min(999, Math.max(prev.missCount, clean.missCount)),
+          lastSentence: (useCleanLatest ? clean.lastSentence : prev.lastSentence) || clean.lastSentence,
+          kkIssueNote: (useCleanLatest ? clean.kkIssueNote : prev.kkIssueNote) || clean.kkIssueNote,
+          updatedAt: Math.max(prev.updatedAt, clean.updatedAt),
+        });
+      }
+    }
+  };
+  ingest(localList);
+  ingest(remoteList);
+
+  return Array.from(map.values())
+    .sort((a, b) => b.missCount - a.missCount || a.lastAlignmentScore - b.lastAlignmentScore)
+    .slice(0, 80);
+}
+
+export function saveWeaknessVocabList(entries: WeaknessVocabEntry[]): WeaknessVocabEntry[] {
+  const sanitized = mergeWeaknessVocabLists(entries, []);
+  if (typeof localStorage !== 'undefined') {
+    try {
+      localStorage.setItem(WEAKNESS_VOCAB_LIST_KEY, JSON.stringify(sanitized));
+    } catch {}
+  }
+  if (typeof window !== 'undefined') {
+    try {
+      window.dispatchEvent(
+        new CustomEvent(WEAKNESS_VOCAB_UPDATED_EVENT, { detail: { count: sanitized.length } })
+      );
+    } catch {}
+  }
+  return sanitized;
+}

@@ -11,6 +11,11 @@ import {
   mergePronunciationAnalytics
 } from './pronunciationAnalytics';
 import { getStoredGlobalSpeechSpeed, saveGlobalSpeechSpeed } from './speechSpeedCalibrator';
+import {
+  loadWeaknessVocabList,
+  mergeWeaknessVocabLists,
+  saveWeaknessVocabList
+} from './aiPhoneticAlignment';
 
 export interface ServerSyncResult {
   success: boolean;
@@ -81,6 +86,7 @@ export function collectLocalSyncPayload() {
     const srsMemory = loadSrsMap();
     const shadowingScores = safeParseJson<Record<string, number>>(localStorage.getItem('fse_shadowing_scores_v1'), {});
     const pronunciationAnalytics = loadPronunciationAnalytics();
+    const weaknessVocabList = loadWeaknessVocabList();
     const noteTimestamps = safeParseJson<Record<string, number>>(localStorage.getItem('fse_note_timestamps_v1'), {});
     const speechSpeed = getStoredGlobalSpeechSpeed(0.85);
     const speechSpeedUpdatedAt = Number(localStorage.getItem('fse_speech_speed_updated_at')) || 0;
@@ -103,6 +109,7 @@ export function collectLocalSyncPayload() {
       srsMemory,
       shadowingScores,
       pronunciationAnalytics,
+      weaknessVocabList,
       speechSpeed,
       speechSpeedUpdatedAt,
       clientTimestamp: Date.now()
@@ -237,6 +244,13 @@ export async function pushLocalProgressToServer(): Promise<ServerSyncResult> {
           data.record.pronunciationAnalytics
         );
         savePronunciationAnalytics(mergedAnalytics);
+      }
+      if (Array.isArray(data.record.weaknessVocabList) && data.record.weaknessVocabList.length > 0) {
+        const mergedWeakness = mergeWeaknessVocabLists(
+          loadWeaknessVocabList(),
+          data.record.weaknessVocabList
+        );
+        saveWeaknessVocabList(mergedWeakness);
       }
       if (
         typeof data.record.speechSpeed === 'number' &&

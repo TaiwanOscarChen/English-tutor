@@ -27,6 +27,11 @@ import {
 } from '../utils/pronunciationAnalytics';
 import { getStoredGlobalSpeechSpeed, saveGlobalSpeechSpeed } from '../utils/speechSpeedCalibrator';
 import { getStoredNoiseSuppressionConfig, saveNoiseSuppressionConfig } from '../utils/cleanroomNoiseReducer';
+import {
+  loadWeaknessVocabList,
+  mergeWeaknessVocabLists,
+  saveWeaknessVocabList
+} from '../utils/aiPhoneticAlignment';
 
 interface SystemDataBackupModalProps {
   isOpen: boolean;
@@ -151,7 +156,7 @@ export const SystemDataBackupModal: React.FC<SystemDataBackupModalProps> = ({
       if (tsRaw) noteTimestamps = JSON.parse(tsRaw);
     } catch {}
     return {
-      version: '2.2',
+      version: '2.3',
       exportDate: new Date().toISOString(),
       appName: 'FSE 每日晶圓級英文導師',
       streakCount,
@@ -164,6 +169,7 @@ export const SystemDataBackupModal: React.FC<SystemDataBackupModalProps> = ({
       srsMemory,
       noteTimestamps,
       pronunciationAnalytics: loadPronunciationAnalytics(),
+      weaknessVocabList: loadWeaknessVocabList(),
       speechSpeed: getStoredGlobalSpeechSpeed(0.85),
       noiseSuppressionConfig: getStoredNoiseSuppressionConfig(),
     };
@@ -244,6 +250,13 @@ export const SystemDataBackupModal: React.FC<SystemDataBackupModalProps> = ({
         );
         savePronunciationAnalytics(merged);
       }
+      if (Array.isArray(parsed.weaknessVocabList)) {
+        const mergedWeakness = mergeWeaknessVocabLists(
+          loadWeaknessVocabList(),
+          parsed.weaknessVocabList
+        );
+        saveWeaknessVocabList(mergedWeakness);
+      }
       if (typeof parsed.speechSpeed === 'number' && Number.isFinite(parsed.speechSpeed)) {
         saveGlobalSpeechSpeed(parsed.speechSpeed);
         try {
@@ -252,8 +265,16 @@ export const SystemDataBackupModal: React.FC<SystemDataBackupModalProps> = ({
       }
       if (parsed.noiseSuppressionConfig && typeof parsed.noiseSuppressionConfig === 'object') {
         const cfg = parsed.noiseSuppressionConfig;
-        if (typeof cfg.enabled === 'boolean' && (cfg.level === 'standard' || cfg.level === 'strong')) {
-          saveNoiseSuppressionConfig({ enabled: cfg.enabled, level: cfg.level });
+        if (typeof cfg.enabled === 'boolean') {
+          const normalizedLevel =
+            cfg.level === 'max' || cfg.level === 'strong'
+              ? 'max'
+              : cfg.level === 'standard'
+              ? 'standard'
+              : null;
+          if (normalizedLevel) {
+            saveNoiseSuppressionConfig({ enabled: cfg.enabled, level: normalizedLevel });
+          }
         }
       }
 

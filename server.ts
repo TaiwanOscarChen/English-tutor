@@ -111,7 +111,7 @@ app.use(
   aiRateLimiter
 );
 
-app.use(["/api/sync/push", "/api/sync/pull", "/api/sync/snapshot"], syncRateLimiter);
+app.use(["/api/sync/push", "/api/sync/pull", "/api/sync/snapshot", "/api/preset-lessons/batch-update"], syncRateLimiter);
 
 app.use(express.static(path.join(process.cwd(), "public")));
 
@@ -794,6 +794,7 @@ app.post("/api/sync/push", (req, res) => {
       srsMemory = {},
       shadowingScores = {},
       pronunciationAnalytics,
+      weaknessVocabList,
       speechSpeed,
       speechSpeedUpdatedAt,
       speechRecordingsCount = 0,
@@ -825,6 +826,7 @@ app.post("/api/sync/push", (req, res) => {
       srsMemory,
       shadowingScores,
       pronunciationAnalytics,
+      weaknessVocabList,
       speechSpeed,
       speechSpeedUpdatedAt,
       speechRecordingsCount,
@@ -3305,13 +3307,22 @@ app.post("/api/stress-test", async (req, res) => {
 // ============================================================================
 const PRESET_OVERRIDES_FILE = path.join(process.cwd(), "data", "preset_lessons_overrides.json");
 
+const SAFE_PRESET_ID_REGEX = /^[a-zA-Z0-9_-]{1,80}$/;
+const RESERVED_OVERRIDE_KEYS = new Set(["__proto__", "constructor", "prototype", "toString", "valueOf"]);
+
 function readServerPresetOverrides(): Record<string, any> {
   try {
     if (!fs.existsSync(PRESET_OVERRIDES_FILE)) return {};
     const raw = fs.readFileSync(PRESET_OVERRIDES_FILE, "utf-8");
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return parsed;
+      const clean: Record<string, any> = Object.create(null);
+      for (const [k, v] of Object.entries(parsed)) {
+        if (SAFE_PRESET_ID_REGEX.test(k) && !RESERVED_OVERRIDE_KEYS.has(k)) {
+          clean[k] = v;
+        }
+      }
+      return { ...clean };
     }
   } catch {}
   return {};
@@ -3322,7 +3333,9 @@ function writeServerPresetOverrides(overrides: Record<string, any>): void {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  fs.writeFileSync(PRESET_OVERRIDES_FILE, JSON.stringify(overrides, null, 2), "utf-8");
+  const tmpPath = `${PRESET_OVERRIDES_FILE}.${process.pid}.tmp`;
+  fs.writeFileSync(tmpPath, JSON.stringify(overrides, null, 2), "utf-8");
+  fs.renameSync(tmpPath, PRESET_OVERRIDES_FILE);
 }
 
 app.get("/api/preset-lessons/overrides", (_req, res) => {
@@ -3350,7 +3363,8 @@ app.post("/api/preset-lessons/batch-update", (req, res) => {
     for (const rawPatch of patches) {
       const id = String(rawPatch?.id || "").trim().slice(0, 80);
       const englishSentence = String(rawPatch?.english_sentence || "").trim().slice(0, 200);
-      if (!id || !englishSentence) continue;
+      if (!id || !englishSentence || !SAFE_PRESET_ID_REGEX.test(id) || RESERVED_OVERRIDE_KEYS.has(id)) continue;
+      if (!Object.prototype.hasOwnProperty.call(current, id) && Object.keys(current).length >= 300) continue;
 
       const candidateLesson = {
         id,

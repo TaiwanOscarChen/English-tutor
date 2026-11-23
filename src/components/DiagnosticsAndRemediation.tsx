@@ -15,6 +15,13 @@ import {
   PronunciationInsights,
   WeakPhonemeDrillItem
 } from '../utils/pronunciationAnalytics';
+import {
+  WeaknessVocabEntry,
+  WEAKNESS_VOCAB_UPDATED_EVENT,
+  loadWeaknessVocabList,
+  removeWeaknessVocabWord
+} from '../utils/aiPhoneticAlignment';
+import { BookMarked, AudioWaveform } from 'lucide-react';
 
 interface DiagnosticsAndRemediationProps {
   diagnostics: UserDiagnostics;
@@ -50,6 +57,9 @@ export const DiagnosticsAndRemediation: React.FC<DiagnosticsAndRemediationProps>
   );
   const [weakDrillItems, setWeakDrillItems] = useState<WeakPhonemeDrillItem[]>([]);
   const [completedDrillIds, setCompletedDrillIds] = useState<string[]>([]);
+  const [weaknessVocabList, setWeaknessVocabList] = useState<WeaknessVocabEntry[]>(() =>
+    loadWeaknessVocabList()
+  );
   const exportTimerRef = useRef<number | null>(null);
   const remediationAbortRef = useRef<AbortController | null>(null);
   const remediationTimerRef = useRef<number | null>(null);
@@ -60,14 +70,17 @@ export const DiagnosticsAndRemediation: React.FC<DiagnosticsAndRemediationProps>
     const syncAll = () => {
       setSrsMap(loadSrsMap());
       setPronInsights(computePronunciationInsights(loadPronunciationAnalytics()));
+      setWeaknessVocabList(loadWeaknessVocabList());
     };
     window.addEventListener('fse-srs-updated', syncAll);
     window.addEventListener('fse-server-synced', syncAll);
+    window.addEventListener(WEAKNESS_VOCAB_UPDATED_EVENT, syncAll);
     window.addEventListener('storage', syncAll);
     return () => {
       isMountedRef.current = false;
       window.removeEventListener('fse-srs-updated', syncAll);
       window.removeEventListener('fse-server-synced', syncAll);
+      window.removeEventListener(WEAKNESS_VOCAB_UPDATED_EVENT, syncAll);
       window.removeEventListener('storage', syncAll);
       remediationAbortRef.current?.abort();
       if (remediationTimerRef.current !== null) {
@@ -1051,6 +1064,102 @@ export const DiagnosticsAndRemediation: React.FC<DiagnosticsAndRemediationProps>
             </div>
           ))}
         </div>
+      </div>
+
+      {/* Closed-Loop Weakness-Vocab-List Review & Drill Card */}
+      <div
+        id="diagnostics-weakness-vocab-panel"
+        className="bg-slate-900/95 border border-rose-500/35 rounded-2xl p-4 sm:p-5 space-y-3 shadow-lg"
+      >
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-2">
+            <div className="p-2 rounded-xl bg-rose-500/20 border border-rose-400/40 text-rose-300">
+              <BookMarked className="w-4 h-4" />
+            </div>
+            <div>
+              <h3 className="text-sm sm:text-base font-black text-white flex items-center gap-2 flex-wrap">
+                <span>Weakness-Vocab-List 弱點單字閉環特訓</span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-rose-950/80 border border-rose-500/40 text-rose-300 tabular-nums">
+                  {weaknessVocabList.length} 詞待加強
+                </span>
+              </h3>
+              <p className="text-[11px] text-slate-400">
+                自動彙整 AI-Phonetic-Alignment 偵測到的 KK 音標偏弱單字，並支援跨裝置雲端同步與一鍵慢速／口說特訓
+              </p>
+            </div>
+          </div>
+          <span className="inline-flex items-center gap-1 text-[10px] font-mono text-indigo-300 bg-indigo-950/60 border border-indigo-500/30 px-2 py-0.5 rounded-lg">
+            <AudioWaveform className="w-3 h-3" />
+            <span>KK 音標聲學同步</span>
+          </span>
+        </div>
+
+        {weaknessVocabList.length === 0 ? (
+          <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 text-xs text-slate-400">
+            目前尚未累積發音偏弱單字。於任一課程開啟口說評測並啟用 <span className="font-mono text-indigo-300 font-bold">AI-Phonetic-Alignment</span> 後，系統將自動收錄 KK 對齊度低於 75% 的單字至此清單。
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+            {weaknessVocabList.slice(0, 10).map((entry) => (
+              <div
+                key={entry.word}
+                className="p-3 rounded-xl bg-slate-950/90 border border-slate-800 hover:border-rose-500/45 transition-colors flex flex-col justify-between gap-2"
+              >
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 flex-wrap font-mono text-xs">
+                      <span className="font-black text-rose-200 text-sm">{entry.displayWord}</span>
+                      <span className="text-indigo-300 font-bold">{entry.kkPhonetic}</span>
+                    </div>
+                    <span className="text-[10px] font-mono font-bold text-amber-300 tabular-nums shrink-0">
+                      對齊 {entry.lastAlignmentScore}% · 失準 {entry.missCount}x
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-slate-300">{entry.chineseMeaning}</div>
+                  <div className="text-[10px] text-slate-400 leading-snug">{entry.kkIssueNote}</div>
+                </div>
+
+                <div className="flex items-center justify-between gap-1.5 pt-1 border-t border-slate-800/80 flex-wrap">
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => speakEnglish(entry.displayWord, 0.7, undefined, 1.0, 80, true)}
+                      className="px-2.5 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/30 border border-amber-500/40 text-amber-200 text-[11px] font-mono font-bold inline-flex items-center gap-1 cursor-pointer"
+                    >
+                      <Volume2 className="w-3 h-3 text-amber-400" />
+                      <span>0.7x 慢聽</span>
+                    </button>
+                    {onPracticeCustomSentence && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onPracticeCustomSentence(
+                            entry.lastSentence || entry.displayWord,
+                            `${entry.displayWord} ${entry.kkPhonetic}`
+                          )
+                        }
+                        className="px-2.5 py-1 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/35 border border-indigo-400/50 text-indigo-200 text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
+                      >
+                        <Mic className="w-3 h-3 text-indigo-300" />
+                        <span>口說特訓</span>
+                      </button>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = removeWeaknessVocabWord(entry.word);
+                      setWeaknessVocabList(next);
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-emerald-950/70 hover:bg-emerald-900/80 border border-emerald-500/40 text-emerald-300 text-[11px] font-bold cursor-pointer"
+                  >
+                    已掌握
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Real-Time Web Audio Buffer Latency & Audio Segment Efficiency Monitor (Speech-Latency-Live-Monitor) */}

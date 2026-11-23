@@ -4,6 +4,10 @@ import {
   PronunciationAnalyticsStore,
   mergePronunciationAnalytics
 } from '../utils/pronunciationAnalytics';
+import {
+  WeaknessVocabEntry,
+  mergeWeaknessVocabLists
+} from '../utils/aiPhoneticAlignment';
 
 /**
  * Fab Server Embedded Persistence Database Engine
@@ -29,6 +33,7 @@ export interface UserProfileRecord {
   srsMemory?: Record<string, any>;
   shadowingScores?: Record<string, number>;
   pronunciationAnalytics?: PronunciationAnalyticsStore;
+  weaknessVocabList?: WeaknessVocabEntry[];
   speechSpeed?: number;
   speechSpeedUpdatedAt?: number;
   speechRecordingsCount: number;
@@ -322,6 +327,9 @@ class FabDatabase {
     const safePronunciationAnalytics = incomingData.pronunciationAnalytics
       ? mergePronunciationAnalytics(null, incomingData.pronunciationAnalytics)
       : undefined;
+    const safeWeaknessVocabList = Array.isArray(incomingData.weaknessVocabList)
+      ? mergeWeaknessVocabLists(incomingData.weaknessVocabList, [])
+      : undefined;
     const incomingSpeed =
       typeof incomingData.speechSpeed === 'number' &&
       Number.isFinite(incomingData.speechSpeed) &&
@@ -350,6 +358,7 @@ class FabDatabase {
         srsMemory: safeSrsMemory,
         shadowingScores: safeShadowingScores,
         pronunciationAnalytics: safePronunciationAnalytics,
+        weaknessVocabList: safeWeaknessVocabList || [],
         speechSpeed: incomingSpeed,
         speechSpeedUpdatedAt: incomingSpeed !== undefined ? incomingSpeedTs || Date.now() : undefined,
         speechRecordingsCount: Math.max(0, Number(incomingData.speechRecordingsCount) || 0),
@@ -583,7 +592,16 @@ class FabDatabase {
         mergedPronunciationAnalytics.sessions.length - (existing.pronunciationAnalytics?.sessions?.length || 0);
     }
 
-    // 11. Merge Speech Speed Preference (latest timestamp wins)
+    // 11. Merge Weakness-Vocab-List (CRDT union by normalized word, capped at 80)
+    const mergedWeaknessVocabList =
+      existing.weaknessVocabList || safeWeaknessVocabList
+        ? mergeWeaknessVocabLists(existing.weaknessVocabList || [], safeWeaknessVocabList || [])
+        : [];
+    if (mergedWeaknessVocabList.length > (existing.weaknessVocabList?.length || 0)) {
+      mergedChanges += mergedWeaknessVocabList.length - (existing.weaknessVocabList?.length || 0);
+    }
+
+    // 12. Merge Speech Speed Preference (latest timestamp wins)
     const prevSpeedTs = Number(existing.speechSpeedUpdatedAt) || 0;
     const useIncomingSpeed = incomingSpeed !== undefined && (existing.speechSpeed === undefined || incomingSpeedTs >= prevSpeedTs);
     const mergedSpeechSpeed = useIncomingSpeed ? incomingSpeed : existing.speechSpeed;
@@ -612,6 +630,7 @@ class FabDatabase {
       srsMemory: mergedSrsMemory,
       shadowingScores: mergedShadowingScores,
       pronunciationAnalytics: mergedPronunciationAnalytics,
+      weaknessVocabList: mergedWeaknessVocabList,
       speechSpeed: mergedSpeechSpeed,
       speechSpeedUpdatedAt: mergedSpeechSpeedTs || undefined,
       speechRecordingsCount: Math.max(

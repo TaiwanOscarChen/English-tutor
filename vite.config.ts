@@ -57,6 +57,9 @@ export default defineConfig(() => {
             if (id.includes('/src/utils/wordDictionary.ts')) {
               return 'word-dictionary';
             }
+            if (id.includes('/src/components/AiErrorCodeGeneratorModal.tsx')) {
+              return 'ai-alarm-code-modal';
+            }
           },
         },
       },
